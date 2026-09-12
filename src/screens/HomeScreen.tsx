@@ -1,0 +1,344 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  SafeAreaView,
+  Alert,
+  ActivityIndicator,
+} from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '@/navigation/routes';
+import { useAudioRecorder } from '@/audio/useAudioRecorder';
+import { VadGate } from '@/audio/vadGate';
+import { Waveform } from '@/components/Waveform';
+import { ToneSelector } from '@/components/ToneSelector';
+import { LanguageSelector } from '@/components/LanguageSelector';
+import { PermissionGate } from '@/components/PermissionGate';
+import { executePipeline } from '@/pipeline/orchestrator';
+import { useSettingsStore } from '@/state/useSettingsStore';
+import { useAppStore } from '@/state/useAppStore';
+import { modelInstaller } from '@/services/modelManager';
+import { lightTheme, darkTheme } from '@/utils/theme';
+import { haptics } from '@/utils/haptics';
+import { logger } from '@/utils/logger';
+
+type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
+
+export const HomeScreen: React.FC = () => {
+  const navigation = useNavigation<NavigationProp>();
+  const themeMode = useSettingsStore((s) => s.themeMode);
+  const theme = themeMode === 'dark' ? darkTheme : lightTheme;
+
+  const defaultTone = useSettingsStore((s) => s.defaultTone);
+  const defaultLang = useSettingsStore((s) => s.defaultLanguage);
+  const vadSensitivity = useSettingsStore((s) => s.vadSensitivity);
+  const hindiOutputFormat = useSettingsStore((s) => s.hindiOutputFormat);
+
+  const { stage, setStage, activeTone, setActiveTone, activeLanguage, setActiveLanguage, setError } =
+    useAppStore();
+
+  const [permissionGranted, setPermissionGranted] = useState(true);
+  const [pipelineStep, setPipelineStep] = useState<string>('');
+
+  const { recordingState, durationMs, amplitude, start, stop, cancel } = useAudioRecorder();
+
+  // Initialize VAD gate with user sensitivity
+  const vadGateRef = useRef<VadGate | null>(null);
+
+  useEffect(() => {
+    setActiveTone(defaultTone);
+    setActiveLanguage(defaultLang);
+  }, [defaultTone, defaultLang, setActiveTone, setActiveLanguage]);
+
+  useEffect(() => {
+    vadGateRef.current = new VadGate(vadSensitivity, {
+      onAutoStop: () => {
+        logger.info('HomeScreen', 'VAD auto-stop triggered');
+        handleStopRecording();
+      },
+      onNoSpeech: () => {
+        logger.info('HomeScreen', 'VAD detected no speech');
+      },
+    });
+  }, [vadSensitivity]);
+
+  const handleStartRecording = async (): Promise<void> => {
+    // Model guard: verify ASR model is available
+    const hasBaseModel = modelInstaller.isInstalled('whisper-base-multilingual');
+    if (!hasBaseModel) {
+      Alert.alert(
+        'Model Required',
+        'Please download the speech recognition model from the Models screen before recording.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Models', onPress: () => navigation.navigate('Models') },
+        ]
+      );
+      return;
+    }
+
+    try {
+      vadGateRef.current?.reset();
+      setStage('recording');
+      await start();
+    } catch (err) {
+      logger.error('HomeScreen', 'Failed to start recording', err);
+      setError('AUDIO_RECORD_FAILED', 'Could not access microphone.');
+    }
+  };
+
+  const handleStopRecording = async (): Promise<void> => {
+    try {
+      setStage('transcribing');
+      setPipelineStep('Finalizing audio...');
+      const audio = await stop();
+
+      if (!audio) {
+        setStage('idle');
+        return;
+      }
+
+      setPipelineStep('Transcribing speech offline...');
+      const result = await executePipeline(
+        audio,
+        {
+          tone: activeTone,
+          lang: activeLanguage,
+          hindiOutput: hindiOutputFormat,
+        },
+        (currentStage) => {
+          if (currentStage === 'asr') {
+            setPipelineStep('Transcribing speech offline...');
+          } else if (currentStage === 'slm') {
+            setPipelineStep('Rewriting tone on-device...');
+          } else if (currentStage === 'saving') {
+            setPipelineStep('Encrypting note...');
+          }
+        }
+      );
+
+      if (result.status === 'ok') {
+        haptics.trigger('success');
+        setStage('idle');
+        navigation.navigate('Result', { result });
+      } else {
+        haptics.trigger('error');
+        setStage('error');
+        setError(result.code, result.message);
+        Alert.alert('Transcription Notice', result.message, [{ text: 'OK' }]);
+      }
+    } catch (err) {
+      logger.error('HomeScreen', 'Error in pipeline execution', err);
+      setStage('idle');
+    }
+  };
+
+  const isRecording = recordingState === 'recording';
+  const isProcessing = stage === 'transcribing' || stage === 'rewriting';
+
+  return (
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]}>
+      {/* Top action bar */}
+      <View style={[styles.topBar, { borderBottomColor: theme.border }]}>
+        <Text style={[styles.appTitle, { color: theme.textPrimary }]}>VoiceNote</Text>
+        <View style={styles.topActions}>
+          <TouchableOpacity
+            style={[styles.iconButton, { backgroundColor: theme.surfaceSubtle }]}
+            onPress={() => navigation.navigate('History')}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="View history"
+          >
+            <Text style={styles.iconText}>🕒</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.iconButton, { backgroundColor: theme.surfaceSubtle }]}
+            onPress={() => navigation.navigate('Models')}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Manage on-device models"
+          >
+            <Text style={styles.iconText}>🧠</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.iconButton, { backgroundColor: theme.surfaceSubtle }]}
+            onPress={() => navigation.navigate('Settings')}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Open settings"
+          >
+            <Text style={styles.iconText}>⚙️</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <PermissionGate
+        permissionGranted={permissionGranted}
+        onRequestPermission={() => setPermissionGranted(true)}
+      />
+
+      {/* Main recording body */}
+      <View style={styles.content}>
+        {/* Tone and Language selectors */}
+        <View style={styles.controlsContainer}>
+          <ToneSelector
+            selectedTone={activeTone}
+            onSelectTone={setActiveTone}
+            disabled={isRecording || isProcessing}
+          />
+          <LanguageSelector
+            selectedLang={activeLanguage}
+            onSelectLang={setActiveLanguage}
+            disabled={isRecording || isProcessing}
+          />
+        </View>
+
+        {/* Live audio visualizer */}
+        <View style={styles.visualizerContainer}>
+          <Waveform amplitude={amplitude} isRecording={isRecording} />
+          <Text style={[styles.durationText, { color: theme.textMuted }]}>
+            {isRecording
+              ? `${Math.floor(durationMs / 1000)}s`
+              : 'Tap microphone to speak'}
+          </Text>
+        </View>
+
+        {/* Processing spinner indicator */}
+        {isProcessing && (
+          <View style={styles.processingCard}>
+            <ActivityIndicator size="small" color={theme.primary} />
+            <Text style={[styles.processingText, { color: theme.textSecondary }]}>
+              {pipelineStep}
+            </Text>
+          </View>
+        )}
+
+        {/* Record trigger button */}
+        <View style={styles.bottomSection}>
+          <TouchableOpacity
+            style={[
+              styles.recordButton,
+              {
+                backgroundColor: isRecording ? theme.recordActive : theme.primary,
+                shadowColor: isRecording ? theme.recordActive : theme.primary,
+              },
+            ]}
+            onPress={isRecording ? handleStopRecording : handleStartRecording}
+            disabled={isProcessing}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel={isRecording ? 'Stop recording' : 'Start recording'}
+          >
+            <Text style={styles.recordButtonIcon}>{isRecording ? '⏹' : '🎙'}</Text>
+          </TouchableOpacity>
+
+          {isRecording && (
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={cancel}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel recording"
+            >
+              <Text style={[styles.cancelButtonText, { color: theme.danger }]}>Cancel</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
+  topBar: {
+    height: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+  },
+  appTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  topActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconText: {
+    fontSize: 16,
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 20,
+    justifyContent: 'space-between',
+    paddingBottom: 40,
+  },
+  controlsContainer: {
+    marginTop: 16,
+  },
+  visualizerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+  },
+  durationText: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginTop: 8,
+  },
+  processingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  processingText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  bottomSection: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recordButton: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  recordButtonIcon: {
+    fontSize: 30,
+    color: '#FFFFFF',
+  },
+  cancelButton: {
+    marginTop: 14,
+    padding: 8,
+  },
+  cancelButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+});
