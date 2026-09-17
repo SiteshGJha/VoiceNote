@@ -13,10 +13,10 @@
 - [x] Add VAD debugging & simulation scripts
 
 ## Phase 3: Model Manager
-- [ ] Implement model catalog and metadata specifications
-- [ ] Implement resumable HTTPS downloader with SHA-256 integrity verification
-- [ ] Build model installation, verification, and uninstallation workflows
-- [ ] Add storage quota and eviction checks
+- [x] Implement model catalog and metadata specifications
+- [x] Implement resumable HTTPS downloader with SHA-256 integrity verification
+- [x] Build model installation, verification, and uninstallation workflows
+- [x] Add storage quota and eviction checks
 
 ## Phase 4: ASR Pipeline
 - [ ] Integrate Whisper native runtime (`whisper.rn` / `react-native-sherpa-onnx`)

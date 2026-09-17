@@ -1,13 +1,20 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { ModelDownloader } from '@/services/modelManager/downloader';
+import * as crypto from 'crypto';
+import { modelDownloader } from '@/services/modelManager/downloader';
 import { ModelSpec, MODEL_CATALOG } from '@/services/modelManager/catalog';
 import { verifyChecksum } from '@/services/modelManager/verifier';
+import { storageQuota } from '@/services/modelManager/storageQuota';
+import { MlError } from '@/ml/errors';
 
 describe('Model Downloader & Integrity Verifier', () => {
+  afterEach(() => {
+    storageQuota.setMockFreeSpaceBytes(null);
+    modelDownloader.setMockPayloadGenerator(null);
+  });
+
   it('rejects insecure HTTP download URLs per privacy rules', async () => {
-    const downloader = new ModelDownloader();
     const insecureSpec: ModelSpec = {
       id: 'insecure-model',
       kind: 'asr',
@@ -21,7 +28,7 @@ describe('Model Downloader & Integrity Verifier', () => {
     };
 
     await expect(
-      downloader.downloadModel(insecureSpec, path.join(os.tmpdir(), 'models'))
+      modelDownloader.downloadModel(insecureSpec, path.join(os.tmpdir(), 'models'))
     ).rejects.toThrow('Insecure download rejected');
   });
 
@@ -30,8 +37,6 @@ describe('Model Downloader & Integrity Verifier', () => {
     const content = 'VoiceNote offline integrity test';
     fs.writeFileSync(tempFile, content);
 
-    // sha256 for "VoiceNote offline integrity test"
-    const crypto = require('crypto');
     const expectedHash = crypto.createHash('sha256').update(content).digest('hex');
 
     const isValid = await verifyChecksum(tempFile, expectedHash);
@@ -41,6 +46,72 @@ describe('Model Downloader & Integrity Verifier', () => {
     expect(isInvalid).toBe(false);
 
     fs.unlinkSync(tempFile);
+  });
+
+  it('throws MODEL_CHECKSUM_FAILED and deletes .part file on checksum mismatch', async () => {
+    const testDir = path.join(os.tmpdir(), `test_models_${Date.now()}`);
+    const badHashSpec: ModelSpec = {
+      id: 'bad-hash-model',
+      kind: 'asr',
+      displayName: 'Bad Hash Test',
+      sizeBytes: 4096,
+      version: '1.0',
+      url: 'https://example.com/model.gguf',
+      sha256: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      quant: 'int8',
+      minRamGb: 1,
+    };
+
+    modelDownloader.setMockPayloadGenerator(() => Buffer.from('CORRUPTED_PAYLOAD_DATA'));
+
+    await expect(modelDownloader.downloadModel(badHashSpec, testDir)).rejects.toThrow(
+      /Checksum failed/
+    );
+
+    // Verify .part file was deleted
+    const partPath = path.join(os.tmpdir(), `${badHashSpec.id}.part`);
+    expect(fs.existsSync(partPath)).toBe(false);
+
+    if (fs.existsSync(testDir)) {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('downloads, verifies checksum, and saves verified model', async () => {
+    const testDir = path.join(os.tmpdir(), `test_models_${Date.now()}`);
+    const payload = Buffer.from('VALID_MODEL_WEIGHTS_CONTENT');
+    const validHash = crypto.createHash('sha256').update(payload).digest('hex');
+
+    const goodSpec: ModelSpec = {
+      id: 'valid-test-model',
+      kind: 'slm',
+      displayName: 'Valid Test',
+      sizeBytes: payload.length,
+      version: '1.0',
+      url: 'https://example.com/valid-model.gguf',
+      sha256: validHash,
+      quant: 'Q4_K_M',
+      minRamGb: 2,
+    };
+
+    modelDownloader.setMockPayloadGenerator(() => payload);
+
+    const progressReports: number[] = [];
+    const finalPath = await modelDownloader.downloadModel(goodSpec, testDir, (pct) => {
+      progressReports.push(pct);
+    });
+
+    expect(fs.existsSync(finalPath)).toBe(true);
+    expect(progressReports.length).toBeGreaterThan(0);
+    expect(progressReports[progressReports.length - 1]).toBe(100);
+
+    // Verify written content matches payload
+    const written = fs.readFileSync(finalPath);
+    expect(written.equals(payload)).toBe(true);
+
+    if (fs.existsSync(testDir)) {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
   });
 
   it('contains required Whisper Base and Qwen2.5 models in catalog', () => {
