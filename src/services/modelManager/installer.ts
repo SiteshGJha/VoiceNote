@@ -5,6 +5,7 @@ import { InstalledModel, ModelSpec, MODEL_CATALOG, getModelSpec, getModelDestina
 import { modelDownloader, ProgressCallback } from './downloader';
 import { verifyChecksum } from './verifier';
 import { asrModelRegistry } from '@/ml/asr/modelRegistry';
+import { slmModelRegistry } from '@/ml/slm/modelRegistry';
 import { logger } from '@/utils/logger';
 
 class ModelInstallerService {
@@ -38,6 +39,8 @@ class ModelInstallerService {
             this.installedModels.set(item.id, item);
             if (item.kind === 'asr') {
               asrModelRegistry.registerInstalledModel(item.id, item.localPath);
+            } else if (item.kind === 'slm') {
+              slmModelRegistry.registerInstalledModel(item.id, item.localPath);
             }
           }
         }
@@ -46,7 +49,7 @@ class ModelInstallerService {
       }
     }
 
-    // 3. In testing/initial state: seed default installed base model if not already set
+    // 3. In testing/initial state: seed default installed base ASR model if not already set
     const baseSpec = getModelSpec('whisper-base-multilingual');
     if (baseSpec && !this.installedModels.has(baseSpec.id)) {
       const defaultPath = path.join(this.modelsDir, 'asr', `${baseSpec.id}.gguf`);
@@ -60,6 +63,22 @@ class ModelInstallerService {
         installedAt: new Date().toISOString(),
       });
       asrModelRegistry.registerInstalledModel(baseSpec.id, defaultPath);
+    }
+
+    // 4. Seed default installed SLM model if not already set
+    const defaultSlmSpec = getModelSpec('qwen2.5-0.5b-instruct');
+    if (defaultSlmSpec && !this.installedModels.has(defaultSlmSpec.id)) {
+      const defaultSlmPath = path.join(this.modelsDir, 'slm', `${defaultSlmSpec.id}-${defaultSlmSpec.quant}.gguf`);
+      this.installedModels.set(defaultSlmSpec.id, {
+        id: defaultSlmSpec.id,
+        kind: defaultSlmSpec.kind,
+        displayName: defaultSlmSpec.displayName,
+        sizeBytes: defaultSlmSpec.sizeBytes,
+        version: defaultSlmSpec.version,
+        localPath: defaultSlmPath,
+        installedAt: new Date().toISOString(),
+      });
+      slmModelRegistry.registerInstalledModel(defaultSlmSpec.id, defaultSlmPath);
     }
   }
 
@@ -135,6 +154,8 @@ class ModelInstallerService {
 
     if (spec.kind === 'asr') {
       asrModelRegistry.registerInstalledModel(spec.id, localPath);
+    } else if (spec.kind === 'slm') {
+      slmModelRegistry.registerInstalledModel(spec.id, localPath);
     }
 
     logger.info('ModelInstaller', `Model ${spec.id} registered and ready`);
@@ -166,6 +187,8 @@ class ModelInstallerService {
 
       if (model.kind === 'asr') {
         asrModelRegistry.unregisterModel(id);
+      } else if (model.kind === 'slm') {
+        slmModelRegistry.unregisterModel(id);
       }
 
       logger.info('ModelInstaller', `Model ${id} deleted successfully`);

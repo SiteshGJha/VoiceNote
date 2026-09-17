@@ -34,6 +34,8 @@ export interface SlmOptions {
   lang: DetectedLang;
   timeoutMs?: number | undefined;
   temperature?: number | undefined;
+  modelPath?: string | undefined;
+  modelId?: string | undefined;
 }
 
 export type SlmResult =

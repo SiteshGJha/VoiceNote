@@ -19,16 +19,33 @@ export function extractCriticalEntities(text: string): string[] {
     entities.add(num.toLowerCase());
   }
 
+  const FILLER_WORDS = new Set([
+    'um', 'uh', 'like', 'matlab', 'arre', 'er', 'ah', 'haan', 'acha', 'bhai', 'yaar', 'okay', 'ok',
+  ]);
+
   // Proper nouns (Capitalized words, camelCase, PascalCase, or uppercase abbreviations)
   const words = text.split(/\s+/);
-  const commonStarters = ['the', 'this', 'that', 'we', 'they', 'you', 'it', 'order', 'please', 'a', 'an'];
+  const commonStarters = new Set([
+    'the', 'this', 'that', 'these', 'those', 'we', 'they', 'you', 'it', 'order',
+    'please', 'a', 'an', 'in', 'on', 'at', 'if', 'when', 'there', 'here', 'let',
+    'lets', "let's", 'my', 'our', 'his', 'her', 'their', 'hello', 'hi', 'hey',
+    'so', 'also', 'just', 'can', 'could', 'would', 'should',
+  ]);
+
   for (let i = 0; i < words.length; i++) {
-    const word = words[i]?.replace(/[.,!?;:()"]/g, '');
-    if (word && /^[A-Z][a-zA-Z0-9_-]+$/.test(word)) {
-      if (i === 0 && commonStarters.includes(word.toLowerCase())) {
+    const word = words[i]?.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '');
+    if (!word) {
+      continue;
+    }
+    const lowerWord = word.toLowerCase();
+    if (FILLER_WORDS.has(lowerWord)) {
+      continue;
+    }
+    if (/^[A-Z][a-zA-Z0-9_-]+$/.test(word)) {
+      if (i === 0 && commonStarters.has(lowerWord)) {
         continue;
       }
-      entities.add(word.toLowerCase());
+      entities.add(lowerWord);
     }
   }
 
@@ -49,7 +66,7 @@ export function validatePreservation(raw: string, final: string): ValidationResu
     };
   }
 
-  // 1. Length ratio check: final length must be within 0.5x to 2.5x of raw
+  // 1. Length ratio check: final length must be within 0.4x to 2.5x of raw
   const rawLen = trimmedRaw.length;
   const finalLen = trimmedFinal.length;
   if (rawLen > 10) {
@@ -69,7 +86,9 @@ export function validatePreservation(raw: string, final: string): ValidationResu
   const missing: string[] = [];
 
   for (const entity of rawEntities) {
-    if (!finalLower.includes(entity)) {
+    const stripped = entity.replace(/[$€₹£]/g, '');
+    const found = finalLower.includes(entity) || (stripped.length > 0 && finalLower.includes(stripped));
+    if (!found) {
       missing.push(entity);
     }
   }

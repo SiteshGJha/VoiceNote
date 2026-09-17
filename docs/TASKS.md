@@ -26,10 +26,10 @@
 - [x] Add WER benchmark harness against fixture datasets
 
 ## Phase 5: SLM Tone Rewriting
-- [ ] Integrate GGUF runtime (`llama.rn`) with lazy model loading
-- [ ] Construct canonical prompt templates for Professional and Casual tones
-- [ ] Implement entity and fact preservation guard (`validatePreservation`)
-- [ ] Add SLM bake-off evaluation script
+- [x] Integrate GGUF runtime (`llama.rn`) with lazy model loading
+- [x] Construct canonical prompt templates for Professional and Casual tones
+- [x] Implement entity and fact preservation guard (`validatePreservation`)
+- [x] Add SLM bake-off evaluation script
 
 ## Phase 6: UI & Production Hardening
 - [ ] Build main recording, transcription, and tone selector screens

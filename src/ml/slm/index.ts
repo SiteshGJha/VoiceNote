@@ -4,7 +4,10 @@ import { buildPrompt } from './promptBuilder';
 import { runLlamaInference } from './llamaRunner';
 import { postProcessOutput } from './postProcess';
 import { validatePreservation } from './validator';
+import { slmModelRegistry } from './modelRegistry';
 import { logger } from '@/utils/logger';
+
+export { slmModelRegistry };
 
 /**
  * Public Tone Rewriting API.
@@ -28,8 +31,12 @@ export async function rewrite(rawText: string, tone: Tone, opts: SlmOptions): Pr
 
   try {
     const prompt = buildPrompt(trimmedRaw, tone, opts.lang);
+    const activeModel = slmModelRegistry.getActiveModel();
+    const modelPath = opts.modelPath ?? activeModel.filePath ?? '/models/slm/qwen2.5-0.5b-instruct-q4_k_m.gguf';
+
     const rawGenerated = await runLlamaInference({
       prompt,
+      modelPath,
       timeoutMs: opts.timeoutMs ?? 10_000,
       temperature: opts.temperature ?? 0.3,
     });

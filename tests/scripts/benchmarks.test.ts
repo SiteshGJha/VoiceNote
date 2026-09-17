@@ -1,5 +1,5 @@
 import { computeWer, computeCer, runWerEvaluation } from '@/../scripts/wer';
-import { evaluateModelPerformance } from '@/../scripts/slm-bakeoff';
+import { evaluateModelPerformance, runSlmBakeOff } from '@/../scripts/slm-bakeoff';
 import { simulateVadFrames } from '@/../scripts/vad-debug';
 
 describe('Benchmark Scripts Harness', () => {
@@ -44,6 +44,15 @@ describe('Benchmark Scripts Harness', () => {
       expect(result.preservationPassRate).toBe(1);
       expect(result.tokensPerSec).toBeGreaterThan(0);
       expect(result.peakRamMb).toBeLessThanOrEqual(500); // within 500MB budget
+    });
+
+    it('runs full bake-off evaluation across candidate models and fixtures', async () => {
+      const results = await runSlmBakeOff(['qwen2.5-0.5b-instruct', 'palmer-005']);
+      expect(results).toHaveLength(2);
+      expect(results[0]?.modelId).toBe('qwen2.5-0.5b-instruct');
+      expect(results[1]?.modelId).toBe('palmer-005');
+      expect(results[0]?.preservationPassRate).toBeGreaterThanOrEqual(0.8);
+      expect(results[0]?.peakRamMb).toBeLessThanOrEqual(500);
     });
   });
 
