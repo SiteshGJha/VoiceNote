@@ -7,10 +7,10 @@
 - [ ] Configure native build targets (iOS Swift, Android Kotlin, arm64-v8a / x86_64)
 
 ## Phase 2: Audio & VAD
-- [ ] Integrate audio recording with background worker
-- [ ] Implement VAD gate (`react-native-nitro-webrtc-vad`) with sensitivity presets (low, medium, high)
-- [ ] Implement automatic silence trimming and auto-stop
-- [ ] Add VAD debugging & simulation scripts
+- [x] Integrate audio recording with background worker
+- [x] Implement VAD gate (`react-native-nitro-webrtc-vad`) with sensitivity presets (low, medium, high)
+- [x] Implement automatic silence trimming and auto-stop
+- [x] Add VAD debugging & simulation scripts
 
 ## Phase 3: Model Manager
 - [ ] Implement model catalog and metadata specifications

@@ -4,6 +4,8 @@ import * as path from 'path';
 import * as os from 'os';
 import { wrapPcmWithWavHeader, calculateRms, calculateDurationMs, SAMPLE_RATE } from './wavUtils';
 import { AudioMeteringData, RecordedAudio, RecordingState } from './types';
+import { audioWorker } from '@/native/audioWorker';
+import { trimSilence } from './silenceTrim';
 import { logger } from '@/utils/logger';
 
 export type AudioDataListener = (chunk: Uint8Array, metering: AudioMeteringData) => void;
@@ -13,7 +15,7 @@ class AudioRecorderService {
   private pcmChunks: Uint8Array[] = [];
   private totalByteLength = 0;
   private listeners: Set<AudioDataListener> = new Set();
-  private timer: NodeJS.Timeout | null = null;
+  private workerUnsubscribe: (() => void) | null = null;
   private startTime = 0;
   private currentTempUri: string | null = null;
 
@@ -29,7 +31,7 @@ class AudioRecorderService {
   }
 
   /**
-   * Starts capturing 16 kHz 16-bit mono PCM.
+   * Starts capturing 16 kHz 16-bit mono PCM via background audio capture worker.
    */
   public async start(): Promise<void> {
     if (this.state === 'recording') {
@@ -43,13 +45,15 @@ class AudioRecorderService {
     this.startTime = Date.now();
     logger.info('AudioRecorder', 'Starting audio recording at 16 kHz mono');
 
-    // In a bare React Native runtime with native audio, this connects to audio streaming callbacks
-    // In Node / Jest / simulation, simulate frame delivery every 30 ms
-    this.startAudioFrameSimulation();
+    this.workerUnsubscribe = audioWorker.addListener((chunk, metering) => {
+      this.pushFrame(chunk, metering);
+    });
+
+    await audioWorker.startCapture();
   }
 
   /**
-   * Stops recording and flushes buffered PCM to a temporary WAV file in app cache.
+   * Stops recording and flushes trimmed PCM to a temporary WAV file in app cache.
    */
   public async stop(): Promise<RecordedAudio | null> {
     if (this.state !== 'recording') {
@@ -57,7 +61,11 @@ class AudioRecorderService {
     }
 
     this.state = 'processing';
-    this.stopAudioFrameSimulation();
+    if (this.workerUnsubscribe) {
+      this.workerUnsubscribe();
+      this.workerUnsubscribe = null;
+    }
+    await audioWorker.stopCapture();
 
     const durationMs = Date.now() - this.startTime;
     logger.info('AudioRecorder', `Recording stopped. Total duration: ${durationMs}ms, bytes: ${this.totalByteLength}`);
@@ -75,8 +83,12 @@ class AudioRecorderService {
       offset += chunk.length;
     }
 
+    // Apply automatic silence trimming with 200 ms phoneme padding
+    const trimResult = trimSilence(mergedPcm, { paddingMs: 200, frameMs: 30 });
+    const finalPcm = trimResult.hasSpeech ? trimResult.trimmedPcm : mergedPcm;
+
     // Wrap with standard 44-byte WAV header
-    const wavBytes = wrapPcmWithWavHeader(mergedPcm);
+    const wavBytes = wrapPcmWithWavHeader(finalPcm);
 
     // Write to temporary cache directory
     const tempDir = os.tmpdir();
@@ -87,10 +99,11 @@ class AudioRecorderService {
 
     return {
       uri: tempFile,
-      durationMs: calculateDurationMs(this.totalByteLength),
+      durationMs: calculateDurationMs(finalPcm.byteLength),
       sampleRate: SAMPLE_RATE,
       channels: 1,
       byteLength: wavBytes.byteLength,
+      hasSpeech: trimResult.hasSpeech,
     };
   }
 
@@ -99,7 +112,11 @@ class AudioRecorderService {
    */
   public async cancel(): Promise<void> {
     logger.info('AudioRecorder', 'Cancelling recording');
-    this.stopAudioFrameSimulation();
+    if (this.workerUnsubscribe) {
+      this.workerUnsubscribe();
+      this.workerUnsubscribe = null;
+    }
+    await audioWorker.stopCapture();
     this.pcmChunks = [];
     this.totalByteLength = 0;
     await this.cleanupTempFile();
@@ -130,9 +147,9 @@ class AudioRecorderService {
   }
 
   /**
-   * Ingests a raw PCM frame (used by native module listeners).
+   * Ingests a raw PCM frame (used by background worker / native audio listeners).
    */
-  public pushFrame(chunk: Uint8Array): void {
+  public pushFrame(chunk: Uint8Array, precomputedMetering?: AudioMeteringData): void {
     if (this.state !== 'recording') {
       return;
     }
@@ -140,12 +157,15 @@ class AudioRecorderService {
     this.pcmChunks.push(chunk);
     this.totalByteLength += chunk.length;
 
-    const { rms, normalized } = calculateRms(chunk);
-    const metering: AudioMeteringData = {
-      amplitude: normalized,
-      rawRms: rms,
-      peak: rms * 1.414,
-    };
+    let metering = precomputedMetering;
+    if (!metering) {
+      const { rms, normalized } = calculateRms(chunk);
+      metering = {
+        amplitude: normalized,
+        rawRms: rms,
+        peak: rms * 1.414,
+      };
+    }
 
     for (const listener of this.listeners) {
       try {
@@ -153,28 +173,6 @@ class AudioRecorderService {
       } catch (err) {
         logger.error('AudioRecorder', 'Error in audio listener', err);
       }
-    }
-  }
-
-  private startAudioFrameSimulation(): void {
-    // 30 ms frame at 16000 Hz, 16-bit mono = 480 samples = 960 bytes
-    const FRAME_BYTES = 960;
-    this.timer = setInterval(() => {
-      const syntheticChunk = new Uint8Array(FRAME_BYTES);
-      // Populate with mild ambient white noise / voice pattern
-      for (let i = 0; i < FRAME_BYTES; i += 2) {
-        const sample = Math.floor((Math.random() - 0.5) * 2000);
-        syntheticChunk[i] = sample & 0xff;
-        syntheticChunk[i + 1] = (sample >> 8) & 0xff;
-      }
-      this.pushFrame(syntheticChunk);
-    }, 30);
-  }
-
-  private stopAudioFrameSimulation(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
     }
   }
 }

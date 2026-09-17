@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { audioRecorder } from './recorder';
-import { RecordedAudio, RecordingState } from './types';
+import { RecordedAudio, RecordingState, AudioMeteringData } from './types';
 import { haptics } from '@/utils/haptics';
+
+export interface UseAudioRecorderOptions {
+  onFrame?: (chunk: Uint8Array, metering: AudioMeteringData) => void;
+}
 
 export interface UseAudioRecorderReturn {
   recordingState: RecordingState;
@@ -12,15 +16,18 @@ export interface UseAudioRecorderReturn {
   cancel: () => Promise<void>;
 }
 
-export function useAudioRecorder(): UseAudioRecorderReturn {
+export function useAudioRecorder(options?: UseAudioRecorderOptions): UseAudioRecorderReturn {
   const [recordingState, setRecordingState] = useState<RecordingState>('idle');
   const [durationMs, setDurationMs] = useState(0);
   const [amplitude, setAmplitude] = useState(0);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const onFrameRef = useRef(options?.onFrame);
+  onFrameRef.current = options?.onFrame;
 
   useEffect(() => {
-    const unsubscribe = audioRecorder.addListener((_chunk, metering) => {
+    const unsubscribe = audioRecorder.addListener((chunk, metering) => {
       setAmplitude(metering.amplitude);
+      onFrameRef.current?.(chunk, metering);
     });
 
     return () => {
@@ -38,9 +45,13 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     setDurationMs(0);
 
     const startTime = Date.now();
-    intervalRef.current = setInterval(() => {
+    const timer = setInterval(() => {
       setDurationMs(Date.now() - startTime);
     }, 100);
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
+    intervalRef.current = timer;
   }, []);
 
   const stop = useCallback(async () => {

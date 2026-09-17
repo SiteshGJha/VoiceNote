@@ -43,10 +43,14 @@ export const HomeScreen: React.FC = () => {
   const [permissionGranted, setPermissionGranted] = useState(true);
   const [pipelineStep, setPipelineStep] = useState<string>('');
 
-  const { recordingState, durationMs, amplitude, start, stop, cancel } = useAudioRecorder();
-
-  // Initialize VAD gate with user sensitivity
   const vadGateRef = useRef<VadGate | null>(null);
+  const handleStopRecordingRef = useRef<(() => Promise<void>) | null>(null);
+
+  const { recordingState, durationMs, amplitude, start, stop, cancel } = useAudioRecorder({
+    onFrame: (chunk) => {
+      vadGateRef.current?.processFrame(chunk);
+    },
+  });
 
   useEffect(() => {
     setActiveTone(defaultTone);
@@ -55,9 +59,15 @@ export const HomeScreen: React.FC = () => {
 
   useEffect(() => {
     vadGateRef.current = new VadGate(vadSensitivity, {
+      onSpeechStart: () => {
+        logger.info('HomeScreen', 'VAD detected speech start');
+      },
+      onSpeechEnd: () => {
+        logger.info('HomeScreen', 'VAD detected speech end, entering silence window');
+      },
       onAutoStop: () => {
         logger.info('HomeScreen', 'VAD auto-stop triggered');
-        handleStopRecording();
+        handleStopRecordingRef.current?.();
       },
       onNoSpeech: () => {
         logger.info('HomeScreen', 'VAD detected no speech');
@@ -101,6 +111,17 @@ export const HomeScreen: React.FC = () => {
         return;
       }
 
+      // VAD & Silence Trimming guard: If audio is 100% silence, short-circuit before ASR
+      if (audio.hasSpeech === false) {
+        setStage('idle');
+        Alert.alert(
+          'No Speech Detected',
+          'No voice was detected in the audio recording. Please speak clearly into the microphone and try again.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
       setPipelineStep('Transcribing speech offline...');
       const result = await executePipeline(
         audio,
@@ -135,6 +156,8 @@ export const HomeScreen: React.FC = () => {
       setStage('idle');
     }
   };
+
+  handleStopRecordingRef.current = handleStopRecording;
 
   const isRecording = recordingState === 'recording';
   const isProcessing = stage === 'transcribing' || stage === 'rewriting';
