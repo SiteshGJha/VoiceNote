@@ -19,11 +19,11 @@
 - [x] Add storage quota and eviction checks
 
 ## Phase 4: ASR Pipeline
-- [ ] Integrate Whisper native runtime (`whisper.rn` / `react-native-sherpa-onnx`)
-- [ ] Wire 16 kHz audio buffer feeding and language detection (en, hi, auto)
-- [ ] Implement Hinglish bilingual prompt handling
-- [ ] Implement Hindi romanization transliteration post-processor
-- [ ] Add WER benchmark harness against fixture datasets
+- [x] Integrate Whisper native runtime (`whisper.rn` / `react-native-sherpa-onnx`)
+- [x] Wire 16 kHz audio buffer feeding and language detection (en, hi, auto)
+- [x] Implement Hinglish bilingual prompt handling
+- [x] Implement Hindi romanization transliteration post-processor
+- [x] Add WER benchmark harness against fixture datasets
 
 ## Phase 5: SLM Tone Rewriting
 - [ ] Integrate GGUF runtime (`llama.rn`) with lazy model loading

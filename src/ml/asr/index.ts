@@ -28,6 +28,26 @@ export async function transcribe(uri: string, opts: AsrOptions): Promise<AsrResu
       };
     }
 
+    const isMock = uri.startsWith('/mock/');
+    if (!isMock && !fs.existsSync(uri)) {
+      return {
+        status: 'error',
+        code: 'AUDIO_RECORD_FAILED',
+        message: `Audio file does not exist at URI: ${uri}`,
+      };
+    }
+
+    // Estimate duration for short-clip language detection heuristic
+    let audioDurationMs = 3000;
+    if (!isMock && fs.existsSync(uri)) {
+      try {
+        const stats = fs.statSync(uri);
+        audioDurationMs = Math.round(Math.max(0, stats.size - 44) / 32);
+      } catch {
+        audioDurationMs = 3000;
+      }
+    }
+
     // 2. Check model registry
     const defaultModel = asrModelRegistry.getModelForTier('balanced');
     if (!defaultModel?.isInstalled) {
@@ -39,7 +59,7 @@ export async function transcribe(uri: string, opts: AsrOptions): Promise<AsrResu
       };
     }
 
-    // 3. Language parameter handling
+    // 3. Language parameter handling & short clip heuristic (< 1.5s)
     let langParam: 'en' | 'hi' | undefined;
     let initialPrompt = opts.prompt;
 
@@ -48,14 +68,21 @@ export async function transcribe(uri: string, opts: AsrOptions): Promise<AsrResu
     } else if (opts.lang === 'hi') {
       langParam = 'hi';
     } else {
-      // Auto: Hinglish hint if user mixes languages
-      langParam = undefined;
-      initialPrompt = 'The speaker may mix Hindi and English.';
+      // Auto: if short clip (< 1500 ms), Whisper language detection is unreliable
+      if (audioDurationMs > 0 && audioDurationMs < 1500) {
+        logger.info('ASR', `Short audio clip (${audioDurationMs}ms < 1500ms) in auto mode: defaulting language to 'en'`);
+        langParam = 'en';
+      } else {
+        langParam = undefined;
+      }
+      initialPrompt = opts.prompt ?? 'The speaker may mix Hindi and English (Hinglish). Please transcribe both accurately.';
     }
 
     // 4. Run Whisper inference with timeout protection
+    const modelPath = defaultModel.filePath ?? `/models/asr/${defaultModel.id}.gguf`;
     const inferenceResult = await runWhisperInference({
       audioUri: uri,
+      modelPath,
       language: langParam,
       initialPrompt,
       timeoutMs: opts.timeoutMs ?? 30_000,
