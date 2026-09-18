@@ -10,6 +10,7 @@ import {
   Modal,
   Share,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation } from '@react-navigation/native';
 import { Header } from '@/components/Header';
 import { historyStorage } from '@/services/history';
@@ -25,10 +26,27 @@ export const HistoryScreen: React.FC = () => {
 
   const [records, setRecords] = useState<TranscriptionRecord[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<TranscriptionRecord | null>(null);
+  const [copiedToast, setCopiedToast] = useState(false);
 
   const loadHistory = async (): Promise<void> => {
     const list = await historyStorage.listRecords();
     setRecords(list);
+  };
+
+  const handleCopy = async (text: string): Promise<void> => {
+    haptics.trigger('success');
+    try {
+      if (Clipboard && typeof Clipboard.setString === 'function') {
+        Clipboard.setString(text);
+      }
+    } catch {
+      // Ignored
+    }
+    setCopiedToast(true);
+    const timer = setTimeout(() => setCopiedToast(false), 2000);
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
   };
 
   useEffect(() => {
@@ -175,16 +193,37 @@ export const HistoryScreen: React.FC = () => {
                   {selectedRecord.rawText}
                 </Text>
 
+                {copiedToast && (
+                  <Text style={[styles.copiedNotice, { color: theme.primary }]}>
+                    ✓ Copied to clipboard
+                  </Text>
+                )}
+
                 <View style={styles.modalActionRow}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, { backgroundColor: theme.primary }]}
+                    onPress={() => handleCopy(selectedRecord.finalText)}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel="Copy rewritten text"
+                  >
+                    <Text style={styles.modalButtonText}>Copy</Text>
+                  </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.modalButton, { backgroundColor: theme.accent }]}
                     onPress={() => handleShare(selectedRecord.finalText)}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel="Share note"
                   >
                     <Text style={styles.modalButtonText}>Share</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.modalButton, { backgroundColor: theme.dangerSurface }]}
                     onPress={() => handleDeleteItem(selectedRecord.id)}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel="Delete note"
                   >
                     <Text style={[styles.modalButtonText, { color: theme.danger }]}>Delete</Text>
                   </TouchableOpacity>
@@ -316,5 +355,11 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '700',
     fontSize: 14,
+  },
+  copiedNotice: {
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 12,
   },
 });

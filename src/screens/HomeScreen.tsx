@@ -7,6 +7,7 @@ import {
   SafeAreaView,
   Alert,
   ActivityIndicator,
+  InteractionManager,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -37,8 +38,16 @@ export const HomeScreen: React.FC = () => {
   const vadSensitivity = useSettingsStore((s) => s.vadSensitivity);
   const hindiOutputFormat = useSettingsStore((s) => s.hindiOutputFormat);
 
-  const { stage, setStage, activeTone, setActiveTone, activeLanguage, setActiveLanguage, setError } =
-    useAppStore();
+  const {
+    stage,
+    setStage,
+    activeTone,
+    setActiveTone,
+    activeLanguage,
+    setActiveLanguage,
+    setError,
+    setMetrics,
+  } = useAppStore();
 
   const [permissionGranted, setPermissionGranted] = useState(true);
   const [pipelineStep, setPipelineStep] = useState<string>('');
@@ -76,12 +85,15 @@ export const HomeScreen: React.FC = () => {
   }, [vadSensitivity]);
 
   const handleStartRecording = async (): Promise<void> => {
-    // Model guard: verify ASR model is available
-    const hasBaseModel = modelInstaller.isInstalled('whisper-base-multilingual');
-    if (!hasBaseModel) {
+    // Model guard: verify both ASR and SLM models are installed
+    const installed = modelInstaller.listInstalled();
+    const hasAsr = installed.some((m) => m.kind === 'asr');
+    const hasSlm = installed.some((m) => m.kind === 'slm');
+
+    if (!hasAsr || !hasSlm) {
       Alert.alert(
-        'Model Required',
-        'Please download the speech recognition model from the Models screen before recording.',
+        'Models Required',
+        'Please download both speech recognition and tone rewriting models from the Models screen before recording.',
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Open Models', onPress: () => navigation.navigate('Models') },
@@ -101,6 +113,7 @@ export const HomeScreen: React.FC = () => {
   };
 
   const handleStopRecording = async (): Promise<void> => {
+    const pipelineStartTime = Date.now();
     try {
       setStage('transcribing');
       setPipelineStep('Finalizing audio...');
@@ -132,8 +145,10 @@ export const HomeScreen: React.FC = () => {
         },
         (currentStage) => {
           if (currentStage === 'asr') {
+            setStage('transcribing');
             setPipelineStep('Transcribing speech offline...');
           } else if (currentStage === 'slm') {
+            setStage('rewriting');
             setPipelineStep('Rewriting tone on-device...');
           } else if (currentStage === 'saving') {
             setPipelineStep('Encrypting note...');
@@ -141,16 +156,24 @@ export const HomeScreen: React.FC = () => {
         }
       );
 
-      if (result.status === 'ok') {
-        haptics.trigger('success');
-        setStage('idle');
-        navigation.navigate('Result', { result });
-      } else {
-        haptics.trigger('error');
-        setStage('error');
-        setError(result.code, result.message);
-        Alert.alert('Transcription Notice', result.message, [{ text: 'OK' }]);
-      }
+      const totalElapsed = Date.now() - pipelineStartTime;
+      setMetrics({
+        totalDurationMs: totalElapsed,
+      });
+
+      // Off-main-thread responsiveness: run UI transition after interactions complete
+      InteractionManager.runAfterInteractions(() => {
+        if (result.status === 'ok') {
+          haptics.trigger('success');
+          setStage('idle');
+          navigation.navigate('Result', { result });
+        } else {
+          haptics.trigger('error');
+          setStage('error');
+          setError(result.code, result.message);
+          Alert.alert('Transcription Notice', result.message, [{ text: 'OK' }]);
+        }
+      });
     } catch (err) {
       logger.error('HomeScreen', 'Error in pipeline execution', err);
       setStage('idle');

@@ -9,7 +9,9 @@ import {
   ScrollView,
   Share,
   Alert,
+  InteractionManager,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/routes';
@@ -68,12 +70,14 @@ export const ResultScreen: React.FC = () => {
 
     try {
       const slmResult = await rewrite(result.raw, newTone, { lang: result.lang });
-      if (slmResult.status === 'ok') {
-        setDisplayText(slmResult.final);
-        setIsShowingRaw(false);
-      } else {
-        setDisplayText(slmResult.fallbackText);
-      }
+      InteractionManager.runAfterInteractions(() => {
+        if (slmResult.status === 'ok') {
+          setDisplayText(slmResult.final);
+          setIsShowingRaw(false);
+        } else {
+          setDisplayText(slmResult.fallbackText);
+        }
+      });
     } catch (err) {
       logger.error('ResultScreen', 'Failed to re-rewrite tone', err);
     } finally {
@@ -95,11 +99,8 @@ export const ResultScreen: React.FC = () => {
 
   const handleCopy = async (): Promise<void> => {
     haptics.trigger('success');
-    // Copy text to clipboard
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const Clipboard = require('@react-native-clipboard/clipboard');
-      if (Clipboard?.setString) {
+      if (Clipboard && typeof Clipboard.setString === 'function') {
         Clipboard.setString(displayText);
       }
     } catch {
@@ -107,7 +108,10 @@ export const ResultScreen: React.FC = () => {
     }
 
     setCopiedToast(true);
-    setTimeout(() => setCopiedToast(false), 2000);
+    const timer = setTimeout(() => setCopiedToast(false), 2000);
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
   };
 
   const handleShare = async (): Promise<void> => {

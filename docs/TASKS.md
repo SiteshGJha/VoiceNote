@@ -32,7 +32,7 @@
 - [x] Add SLM bake-off evaluation script
 
 ## Phase 6: UI & Production Hardening
-- [ ] Build main recording, transcription, and tone selector screens
-- [ ] Implement history screen with encrypted storage (max 50 records)
-- [ ] Enforce off-main-thread inference and UI responsiveness metrics
-- [ ] Perform release checks and privacy audits
+- [x] Build main recording, transcription, and tone selector screens
+- [x] Implement history screen with encrypted storage (max 50 records)
+- [x] Enforce off-main-thread inference and UI responsiveness metrics
+- [x] Perform release checks and privacy audits
