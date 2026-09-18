@@ -1,10 +1,10 @@
 # VoiceNote — Ordered Task Breakdown
 
 ## Phase 1: Project Setup & Architecture
-- [ ] Initialize bare React Native project with TypeScript strict mode
-- [ ] Configure Zustand store and encrypted MMKV persistence
-- [ ] Set up navigation stack (React Navigation)
-- [ ] Configure native build targets (iOS Swift, Android Kotlin, arm64-v8a / x86_64)
+- [x] Initialize bare React Native project with TypeScript strict mode
+- [x] Configure Zustand store and encrypted MMKV persistence
+- [x] Set up navigation stack (React Navigation)
+- [x] Configure native build targets (iOS Swift, Android Kotlin, arm64-v8a / x86_64)
 
 ## Phase 2: Audio & VAD
 - [x] Integrate audio recording with background worker
