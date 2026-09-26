@@ -8,16 +8,20 @@ import {
   Alert,
   ActivityIndicator,
   InteractionManager,
+  Platform,
+  PermissionsAndroid,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/routes';
 import { useAudioRecorder } from '@/audio/useAudioRecorder';
+import { nativeAudio } from '@/native/nativeAudio';
 import { VadGate } from '@/audio/vadGate';
 import { Waveform } from '@/components/Waveform';
 import { ToneSelector } from '@/components/ToneSelector';
 import { LanguageSelector } from '@/components/LanguageSelector';
 import { PermissionGate } from '@/components/PermissionGate';
+import { BrandIcon } from '@/components/BrandIcon';
 import { executePipeline } from '@/pipeline/orchestrator';
 import { useSettingsStore } from '@/state/useSettingsStore';
 import { useAppStore } from '@/state/useAppStore';
@@ -37,6 +41,7 @@ export const HomeScreen: React.FC = () => {
   const defaultLang = useSettingsStore((s) => s.defaultLanguage);
   const vadSensitivity = useSettingsStore((s) => s.vadSensitivity);
   const hindiOutputFormat = useSettingsStore((s) => s.hindiOutputFormat);
+  const asrModelTier = useSettingsStore((s) => s.asrModelTier);
 
   const {
     stage,
@@ -49,11 +54,13 @@ export const HomeScreen: React.FC = () => {
     setMetrics,
   } = useAppStore();
 
-  const [permissionGranted, setPermissionGranted] = useState(true);
+  const [permissionGranted, setPermissionGranted] = useState<boolean | null>(null);
   const [pipelineStep, setPipelineStep] = useState<string>('');
 
   const vadGateRef = useRef<VadGate | null>(null);
   const handleStopRecordingRef = useRef<(() => Promise<void>) | null>(null);
+  const isFinalizingRef = useRef<boolean>(false);
+  const isStartingRef = useRef<boolean>(false);
 
   const { recordingState, durationMs, amplitude, start, stop, cancel } = useAudioRecorder({
     onFrame: (chunk) => {
@@ -65,6 +72,51 @@ export const HomeScreen: React.FC = () => {
     setActiveTone(defaultTone);
     setActiveLanguage(defaultLang);
   }, [defaultTone, defaultLang, setActiveTone, setActiveLanguage]);
+
+  useEffect(() => {
+    const checkMicPermission = async () => {
+      if (!nativeAudio.isNativeAvailable) {
+        setPermissionGranted(true);
+        return;
+      }
+
+      if (Platform.OS === 'android' && PermissionsAndroid?.check) {
+        try {
+          const micPerm = PermissionsAndroid.PERMISSIONS.RECORD_AUDIO;
+          if (micPerm) {
+            const granted = await PermissionsAndroid.check(micPerm);
+            setPermissionGranted(granted);
+          } else {
+            setPermissionGranted(true);
+          }
+        } catch {
+          setPermissionGranted(false);
+        }
+      } else {
+        setPermissionGranted(true);
+      }
+    };
+
+    checkMicPermission();
+  }, []);
+
+  const handleRequestPermission = async (): Promise<void> => {
+    if (Platform.OS === 'android' && PermissionsAndroid?.request) {
+      try {
+        const micPerm = PermissionsAndroid.PERMISSIONS.RECORD_AUDIO;
+        if (micPerm) {
+          const result = await PermissionsAndroid.request(micPerm);
+          setPermissionGranted(result === PermissionsAndroid.RESULTS.GRANTED);
+        } else {
+          setPermissionGranted(true);
+        }
+      } catch {
+        setPermissionGranted(false);
+      }
+    } else {
+      setPermissionGranted(true);
+    }
+  };
 
   useEffect(() => {
     vadGateRef.current = new VadGate(vadSensitivity, {
@@ -85,12 +137,19 @@ export const HomeScreen: React.FC = () => {
   }, [vadSensitivity]);
 
   const handleStartRecording = async (): Promise<void> => {
+    if (isStartingRef.current) {
+      logger.info('HomeScreen', 'Start already in progress, ignoring duplicate trigger');
+      return;
+    }
+    isStartingRef.current = true;
+
     // Model guard: verify both ASR and SLM models are installed
     const installed = modelInstaller.listInstalled();
     const hasAsr = installed.some((m) => m.kind === 'asr');
     const hasSlm = installed.some((m) => m.kind === 'slm');
 
     if (!hasAsr || !hasSlm) {
+      isStartingRef.current = false;
       Alert.alert(
         'Models Required',
         'Please download both speech recognition and tone rewriting models from the Models screen before recording.',
@@ -103,16 +162,26 @@ export const HomeScreen: React.FC = () => {
     }
 
     try {
+      isFinalizingRef.current = false;
       vadGateRef.current?.reset();
       setStage('recording');
       await start();
     } catch (err) {
       logger.error('HomeScreen', 'Failed to start recording', err);
       setError('AUDIO_RECORD_FAILED', 'Could not access microphone.');
+    } finally {
+      isStartingRef.current = false;
     }
   };
 
   const handleStopRecording = async (): Promise<void> => {
+    // Debounce: VAD auto-stop and manual tap may both trigger; finalize once.
+    if (isFinalizingRef.current) {
+      logger.info('HomeScreen', 'Stop already in progress, ignoring duplicate trigger');
+      return;
+    }
+    isFinalizingRef.current = true;
+
     const pipelineStartTime = Date.now();
     try {
       setStage('transcribing');
@@ -142,6 +211,7 @@ export const HomeScreen: React.FC = () => {
           tone: activeTone,
           lang: activeLanguage,
           hindiOutput: hindiOutputFormat,
+          asrTier: asrModelTier,
         },
         (currentStage) => {
           if (currentStage === 'asr') {
@@ -177,6 +247,8 @@ export const HomeScreen: React.FC = () => {
     } catch (err) {
       logger.error('HomeScreen', 'Error in pipeline execution', err);
       setStage('idle');
+    } finally {
+      isFinalizingRef.current = false;
     }
   };
 
@@ -189,7 +261,10 @@ export const HomeScreen: React.FC = () => {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]}>
       {/* Top action bar */}
       <View style={[styles.topBar, { borderBottomColor: theme.border }]}>
-        <Text style={[styles.appTitle, { color: theme.textPrimary }]}>VoiceNote</Text>
+        <View style={styles.brandRow}>
+          <BrandIcon size={32} />
+          <Text style={[styles.appTitle, { color: theme.textPrimary }]}>VoiceNote</Text>
+        </View>
         <View style={styles.topActions}>
           <TouchableOpacity
             style={[styles.iconButton, { backgroundColor: theme.surfaceSubtle }]}
@@ -222,8 +297,8 @@ export const HomeScreen: React.FC = () => {
       </View>
 
       <PermissionGate
-        permissionGranted={permissionGranted}
-        onRequestPermission={() => setPermissionGranted(true)}
+        permissionGranted={permissionGranted ?? true}
+        onRequestPermission={handleRequestPermission}
       />
 
       {/* Main recording body */}
@@ -309,6 +384,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     borderBottomWidth: 1,
+  },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   appTitle: {
     fontSize: 20,
