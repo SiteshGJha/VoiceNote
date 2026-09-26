@@ -15,7 +15,8 @@
     "moduleResolution": "node",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@testing-library/react-native": ["tests/mocks/testing-library-react-native.ts"]
     },
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
