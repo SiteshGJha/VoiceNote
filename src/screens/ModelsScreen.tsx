@@ -12,14 +12,12 @@ import { useNavigation } from '@react-navigation/native';
 import { Header } from '@/components/Header';
 import { ProgressBar } from '@/components/ProgressBar';
 import { modelInstaller, ModelSpec, storageQuota, StorageQuotaInfo } from '@/services/modelManager';
-import { useSettingsStore } from '@/state/useSettingsStore';
-import { lightTheme, darkTheme } from '@/utils/theme';
+import { useSystemTheme } from '@/utils/theme';
 import { haptics } from '@/utils/haptics';
 
 export const ModelsScreen: React.FC = () => {
   const navigation = useNavigation();
-  const themeMode = useSettingsStore((s) => s.themeMode);
-  const theme = themeMode === 'dark' ? darkTheme : lightTheme;
+  const theme = useSystemTheme();
 
   const [availableModels, setAvailableModels] = useState<ModelSpec[]>([]);
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});

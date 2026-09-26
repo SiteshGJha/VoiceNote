@@ -18,7 +18,7 @@ import { historyStorage } from '@/services/history';
 import { Tone, Lang, HindiOutputFormat, AsrModelTier } from '@/ml/types';
 import { VadSensitivity } from '@/audio/vadPresets';
 import { ThemeMode } from '@/state/types';
-import { lightTheme, darkTheme } from '@/utils/theme';
+import { useSystemTheme } from '@/utils/theme';
 import { haptics } from '@/utils/haptics';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Settings'>;
@@ -26,7 +26,7 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Settings'>;
 export const SettingsScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const settings = useSettingsStore();
-  const theme = settings.themeMode === 'dark' ? darkTheme : lightTheme;
+  const theme = useSystemTheme();
 
   const handleWipeAllData = (): void => {
     Alert.alert(

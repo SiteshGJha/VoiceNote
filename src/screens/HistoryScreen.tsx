@@ -16,14 +16,12 @@ import { useNavigation } from '@react-navigation/native';
 import { Header } from '@/components/Header';
 import { historyStorage } from '@/services/history';
 import { TranscriptionRecord } from '@/services/history/types';
-import { useSettingsStore } from '@/state/useSettingsStore';
-import { lightTheme, darkTheme } from '@/utils/theme';
+import { useSystemTheme } from '@/utils/theme';
 import { haptics } from '@/utils/haptics';
 
 export const HistoryScreen: React.FC = () => {
   const navigation = useNavigation();
-  const themeMode = useSettingsStore((s) => s.themeMode);
-  const theme = themeMode === 'dark' ? darkTheme : lightTheme;
+  const theme = useSystemTheme();
 
   const isMountedRef = useRef(true);
   const [isLoading, setIsLoading] = useState(true);

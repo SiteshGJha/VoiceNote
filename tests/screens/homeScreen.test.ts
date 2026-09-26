@@ -86,6 +86,10 @@ jest.mock('react-native', () => {
       check: jest.fn().mockResolvedValue(true),
       request: jest.fn().mockResolvedValue('granted'),
     },
+    Appearance: {
+      getColorScheme: jest.fn().mockReturnValue('light'),
+      addChangeListener: jest.fn().mockReturnValue({ remove: jest.fn() }),
+    },
   };
 });
 

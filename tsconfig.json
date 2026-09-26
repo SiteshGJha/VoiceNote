@@ -16,7 +16,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@testing-library/react-native": ["tests/mocks/testing-library-react-native.ts"]
+      "@testing-library/react-native": ["tests/mocks/testing-library-react-native.ts"],
+      "@testing-library/react-hooks": ["tests/mocks/testing-library-react-native.ts"]
     },
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,

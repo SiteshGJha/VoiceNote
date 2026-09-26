@@ -25,7 +25,7 @@ import { executePipeline } from '@/pipeline/orchestrator';
 import { useSettingsStore } from '@/state/useSettingsStore';
 import { useAppStore } from '@/state/useAppStore';
 import { modelInstaller } from '@/services/modelManager';
-import { lightTheme, darkTheme } from '@/utils/theme';
+import { useSystemTheme } from '@/utils/theme';
 import { haptics } from '@/utils/haptics';
 import { logger } from '@/utils/logger';
 
@@ -33,8 +33,7 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
 export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
-  const themeMode = useSettingsStore((s) => s.themeMode);
-  const theme = themeMode === 'dark' ? darkTheme : lightTheme;
+  const theme = useSystemTheme();
 
   const defaultTone = useSettingsStore((s) => s.defaultTone);
   const defaultLang = useSettingsStore((s) => s.defaultLanguage);

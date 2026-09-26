@@ -18,8 +18,7 @@ import { Header } from '@/components/Header';
 import { ToneSelector } from '@/components/ToneSelector';
 import { rewrite } from '@/ml/slm';
 import { Tone } from '@/ml/types';
-import { useSettingsStore } from '@/state/useSettingsStore';
-import { lightTheme, darkTheme } from '@/utils/theme';
+import { useSystemTheme } from '@/utils/theme';
 import { haptics } from '@/utils/haptics';
 import { logger } from '@/utils/logger';
 
@@ -29,8 +28,7 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Result'>;
 export const ResultScreen: React.FC = () => {
   const route = useRoute<ResultScreenRouteProp>();
   const navigation = useNavigation<NavigationProp>();
-  const themeMode = useSettingsStore((s) => s.themeMode);
-  const theme = themeMode === 'dark' ? darkTheme : lightTheme;
+  const theme = useSystemTheme();
 
   const { result } = route.params;
 

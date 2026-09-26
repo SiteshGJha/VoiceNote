@@ -57,6 +57,24 @@ export const Share = {
 export const TextInput = 'TextInput';
 export const ScrollView = 'ScrollView';
 
+export type ColorSchemeName = 'light' | 'dark' | null | undefined;
+
+export const Appearance = {
+  _listeners: [] as Array<(preferences: { colorScheme: ColorSchemeName }) => void>,
+  getColorScheme: (): ColorSchemeName => 'light',
+  addChangeListener(listener: (preferences: { colorScheme: ColorSchemeName }) => void) {
+    this._listeners.push(listener);
+    return {
+      remove: () => {
+        const idx = this._listeners.indexOf(listener);
+        if (idx !== -1) {
+          this._listeners.splice(idx, 1);
+        }
+      },
+    };
+  },
+};
+
 export default {
   Platform,
   NativeModules,
@@ -74,5 +92,7 @@ export default {
   Share,
   TextInput,
   ScrollView,
+  Appearance,
 };
+
 

@@ -20,6 +20,8 @@ export interface RenderResult {
   unmount: () => void;
 }
 
+const activeRenderers = new Set<() => void>();
+
 export function render(element: React.ReactElement): RenderResult {
   let hookIndex = 0;
   const stateValues: any[] = [];
@@ -202,6 +204,11 @@ export function render(element: React.ReactElement): RenderResult {
       }
     }
   };
+
+  const flushIfDirty = () => {
+    flushEffects();
+  };
+  activeRenderers.add(flushIfDirty);
 
   // Initial mount render
   executeRender(currentElement);
@@ -389,6 +396,7 @@ export function render(element: React.ReactElement): RenderResult {
       return found;
     },
     unmount: () => {
+      activeRenderers.delete(flushIfDirty);
       for (const record of effectRecords) {
         if (typeof record?.cleanup === 'function') {
           record.cleanup();
@@ -400,8 +408,51 @@ export function render(element: React.ReactElement): RenderResult {
 
 export const act = (callback: () => void | Promise<void>): any => {
   const result = callback();
+  if (result && typeof (result as any).then === 'function') {
+    return (result as Promise<void>).then((res) => {
+      activeRenderers.forEach((flush) => flush());
+      return res;
+    });
+  }
+  activeRenderers.forEach((flush) => flush());
   return result;
 };
+
+export interface RenderHookResult<T> {
+  result: { current: T };
+  rerender: (newHook?: () => T) => void;
+  unmount: () => void;
+}
+
+export function renderHook<T>(hook: () => T): RenderHookResult<T> {
+  let latestResult: T = undefined as any;
+  let currentHook = hook;
+
+  function HookWrapper() {
+    latestResult = currentHook();
+    return null;
+  }
+
+  const utils = render(React.createElement(HookWrapper));
+
+  return {
+    result: {
+      get current() {
+        activeRenderers.forEach((flush) => flush());
+        return latestResult;
+      },
+    } as { current: T },
+    rerender: (newHook?: () => T) => {
+      if (newHook) {
+        currentHook = newHook;
+      }
+      utils.rerender(React.createElement(HookWrapper));
+    },
+    unmount: () => {
+      utils.unmount();
+    },
+  };
+}
 
 export const fireEvent = {
   press: (node: any) => {
@@ -431,6 +482,7 @@ export const waitFor = async (
 
 export default {
   render,
+  renderHook,
   act,
   fireEvent,
   waitFor,
