@@ -39,6 +39,7 @@ describe('Pipeline Orchestrator & Audio File Cleanup', () => {
       expect(result.raw).toBeTruthy();
       expect(result.final).toBeTruthy();
       expect(result.tone).toBe('professional');
+      expect(result.usedFallback).toBe(false);
     }
 
     expect(stagesVisited).toContain('asr');
@@ -53,4 +54,58 @@ describe('Pipeline Orchestrator & Audio File Cleanup', () => {
     expect(history.length).toBeGreaterThan(0);
     expect(history[0]?.finalText).toBe(result.status === 'ok' ? result.final : '');
   });
+
+  it('result contains asrDurationMs and slmDurationMs when pipeline succeeds', async () => {
+    const tempDir = os.tmpdir();
+    const tempAudioPath = path.join(tempDir, `test_audio_timing_${Date.now()}.wav`);
+    fs.writeFileSync(tempAudioPath, Buffer.from('RIFF....WAVEfmt ....data....'));
+
+    const mockAudio: RecordedAudio = {
+      uri: tempAudioPath,
+      durationMs: 2000,
+      sampleRate: 16000,
+      channels: 1,
+      byteLength: 64000,
+    };
+
+    const result = await executePipeline(mockAudio, {
+      tone: 'professional',
+      lang: 'en',
+    });
+
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') {
+      expect(typeof result.asrDurationMs).toBe('number');
+      expect(typeof result.slmDurationMs).toBe('number');
+      expect(result.asrDurationMs).toBeGreaterThan(0);
+      expect(result.slmDurationMs).toBeGreaterThan(0);
+    }
+  });
+
+  it('result returns slmDurationMs as 0 when rewriting is skipped', async () => {
+    const tempDir = os.tmpdir();
+    const tempAudioPath = path.join(tempDir, `test_audio_timing_skip_${Date.now()}.wav`);
+    fs.writeFileSync(tempAudioPath, Buffer.from('RIFF....WAVEfmt ....data....'));
+
+    const mockAudio: RecordedAudio = {
+      uri: tempAudioPath,
+      durationMs: 2000,
+      sampleRate: 16000,
+      channels: 1,
+      byteLength: 64000,
+    };
+
+    const result = await executePipeline(mockAudio, {
+      tone: 'professional',
+      lang: 'en',
+      skipRewriting: true,
+    });
+
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') {
+      expect(result.asrDurationMs).toBeGreaterThan(0);
+      expect(result.slmDurationMs).toBe(0);
+    }
+  });
 });
+

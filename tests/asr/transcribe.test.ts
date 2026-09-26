@@ -1,5 +1,9 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { transcribe } from '@/ml/asr';
 import { asrModelRegistry } from '@/ml/asr/modelRegistry';
+import { wrapPcmWithWavHeader } from '@/audio/wavUtils';
 
 describe('ASR Transcription Pipeline', () => {
   it('transcribes English audio clip successfully', async () => {
@@ -46,6 +50,26 @@ describe('ASR Transcription Pipeline', () => {
     }
   });
 
+  it('applies short-clip heuristic (< 1.5s) in auto mode defaulting to en', async () => {
+    // 800ms of audio (800 * 32 bytes = 25600 bytes)
+    const shortPcm = new Uint8Array(800 * 32);
+    const wavBytes = wrapPcmWithWavHeader(shortPcm);
+    const shortWavPath = path.join(os.tmpdir(), `short_test_${Date.now()}.wav`);
+    fs.writeFileSync(shortWavPath, Buffer.from(wavBytes.buffer, wavBytes.byteOffset, wavBytes.byteLength));
+
+    try {
+      const result = await transcribe(shortWavPath, { lang: 'auto' });
+      expect(result.status).toBe('ok');
+      if (result.status === 'ok') {
+        expect(result.detectedLang).toBe('en');
+      }
+    } finally {
+      if (fs.existsSync(shortWavPath)) {
+        fs.unlinkSync(shortWavPath);
+      }
+    }
+  });
+
   it('returns ASR_MODEL_MISSING error when required model is not installed', async () => {
     // Temporarily unregister base model
     asrModelRegistry.unregisterModel('whisper-base-multilingual');
@@ -62,6 +86,14 @@ describe('ASR Transcription Pipeline', () => {
 
   it('returns error when audio uri is empty', async () => {
     const result = await transcribe('', { lang: 'en' });
+    expect(result.status).toBe('error');
+    if (result.status === 'error') {
+      expect(result.code).toBe('AUDIO_RECORD_FAILED');
+    }
+  });
+
+  it('returns error when non-mock audio file does not exist', async () => {
+    const result = await transcribe('/non/existent/path/file.wav', { lang: 'en' });
     expect(result.status).toBe('error');
     if (result.status === 'error') {
       expect(result.code).toBe('AUDIO_RECORD_FAILED');

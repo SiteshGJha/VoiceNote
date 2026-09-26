@@ -1,3 +1,7 @@
+import { useEffect, useState } from 'react';
+import { Appearance, ColorSchemeName } from 'react-native';
+import { useSettingsStore } from '@/state/useSettingsStore';
+
 export interface ThemeColors {
   background: string;
   surface: string;
@@ -13,6 +17,7 @@ export interface ThemeColors {
   dangerSurface: string;
   success: string;
   warning: string;
+  warningLight: string;
   waveformBar: string;
   recordActive: string;
 }
@@ -32,6 +37,7 @@ export const lightTheme: ThemeColors = {
   dangerSurface: '#FFF5F5',
   success: '#38A169',
   warning: '#D69E2E',
+  warningLight: '#FFF9E6',
   waveformBar: '#4299E1',
   recordActive: '#E53E3E',
 };
@@ -51,6 +57,24 @@ export const darkTheme: ThemeColors = {
   dangerSurface: '#4A1515',
   success: '#68D391',
   warning: '#F6E05E',
+  warningLight: '#4A3F1E',
   waveformBar: '#63B3ED',
   recordActive: '#FC8181',
 };
+
+export function useSystemTheme(): ThemeColors {
+  const themeMode = useSettingsStore((s) => s.themeMode);
+  const [osScheme, setOsScheme] = useState<ColorSchemeName>(Appearance?.getColorScheme?.() ?? 'light');
+
+  useEffect(() => {
+    if (themeMode !== 'system' || !Appearance?.addChangeListener) return;
+    setOsScheme(Appearance?.getColorScheme?.() ?? 'light');
+    const sub = Appearance.addChangeListener(({ colorScheme }) => setOsScheme(colorScheme));
+    return () => sub?.remove?.();
+  }, [themeMode]);
+
+  if (themeMode === 'dark') return darkTheme;
+  if (themeMode === 'light') return lightTheme;
+  return osScheme === 'dark' ? darkTheme : lightTheme;
+}
+

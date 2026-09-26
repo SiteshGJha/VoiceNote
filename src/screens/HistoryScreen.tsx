@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,30 +9,66 @@ import {
   Alert,
   Modal,
   Share,
+  ActivityIndicator,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation } from '@react-navigation/native';
 import { Header } from '@/components/Header';
 import { historyStorage } from '@/services/history';
 import { TranscriptionRecord } from '@/services/history/types';
-import { useSettingsStore } from '@/state/useSettingsStore';
-import { lightTheme, darkTheme } from '@/utils/theme';
+import { useSystemTheme } from '@/utils/theme';
 import { haptics } from '@/utils/haptics';
 
 export const HistoryScreen: React.FC = () => {
   const navigation = useNavigation();
-  const themeMode = useSettingsStore((s) => s.themeMode);
-  const theme = themeMode === 'dark' ? darkTheme : lightTheme;
+  const theme = useSystemTheme();
 
+  const isMountedRef = useRef(true);
+  const [isLoading, setIsLoading] = useState(true);
   const [records, setRecords] = useState<TranscriptionRecord[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<TranscriptionRecord | null>(null);
+  const [copiedToast, setCopiedToast] = useState(false);
 
   const loadHistory = async (): Promise<void> => {
-    const list = await historyStorage.listRecords();
-    setRecords(list);
+    setIsLoading(true);
+    try {
+      const list = await historyStorage.listRecords();
+      if (isMountedRef.current) {
+        setRecords(list);
+      }
+    } catch {
+      // Ignored
+    } finally {
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
+    }
+  };
+
+  const handleCopy = async (text: string): Promise<void> => {
+    haptics.trigger('success');
+    try {
+      if (Clipboard && typeof Clipboard.setString === 'function') {
+        Clipboard.setString(text);
+      }
+    } catch {
+      // Ignored
+    }
+    setCopiedToast(true);
+    const timer = setTimeout(() => setCopiedToast(false), 2000);
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
   };
 
   useEffect(() => {
+    let isMounted = true;
+    isMountedRef.current = true;
     loadHistory();
+    return () => {
+      isMounted = false;
+      isMountedRef.current = false;
+    };
   }, []);
 
   const handleDeleteItem = (id: string): void => {
@@ -135,20 +171,32 @@ export const HistoryScreen: React.FC = () => {
         }}
       />
 
-      {records.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={[styles.emptyIcon, { color: theme.textMuted }]}>📝</Text>
-          <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>No Notes Yet</Text>
-          <Text style={[styles.emptySubtitle, { color: theme.textSecondary }]}>
-            Recorded notes are saved encrypted on your device and capped at 50 records.
-          </Text>
+      {isLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator
+            testID="history-loading"
+            size="large"
+            color={theme.primary}
+          />
         </View>
       ) : (
         <FlatList
           data={records}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[
+            styles.listContent,
+            records.length === 0 && styles.emptyListContent,
+          ]}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={[styles.emptyIcon, { color: theme.textMuted }]}>📝</Text>
+              <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>No Notes Yet</Text>
+              <Text style={[styles.emptySubtitle, { color: theme.textSecondary }]}>
+                No notes yet — tap the mic to record your first note.
+              </Text>
+            </View>
+          }
         />
       )}
 
@@ -175,16 +223,37 @@ export const HistoryScreen: React.FC = () => {
                   {selectedRecord.rawText}
                 </Text>
 
+                {copiedToast && (
+                  <Text style={[styles.copiedNotice, { color: theme.primary }]}>
+                    ✓ Copied to clipboard
+                  </Text>
+                )}
+
                 <View style={styles.modalActionRow}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, { backgroundColor: theme.primary }]}
+                    onPress={() => handleCopy(selectedRecord.finalText)}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel="Copy rewritten text"
+                  >
+                    <Text style={styles.modalButtonText}>Copy</Text>
+                  </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.modalButton, { backgroundColor: theme.accent }]}
                     onPress={() => handleShare(selectedRecord.finalText)}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel="Share note"
                   >
                     <Text style={styles.modalButtonText}>Share</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.modalButton, { backgroundColor: theme.dangerSurface }]}
                     onPress={() => handleDeleteItem(selectedRecord.id)}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel="Delete note"
                   >
                     <Text style={[styles.modalButtonText, { color: theme.danger }]}>Delete</Text>
                   </TouchableOpacity>
@@ -205,6 +274,10 @@ const styles = StyleSheet.create({
   listContent: {
     padding: 16,
     gap: 12,
+  },
+  emptyListContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
   },
   itemCard: {
     borderRadius: 12,
@@ -238,6 +311,11 @@ const styles = StyleSheet.create({
   itemSnippet: {
     fontSize: 14,
     lineHeight: 20,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyContainer: {
     flex: 1,
@@ -316,5 +394,11 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '700',
     fontSize: 14,
+  },
+  copiedNotice: {
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 12,
   },
 });

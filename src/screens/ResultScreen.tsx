@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,8 +8,9 @@ import {
   SafeAreaView,
   ScrollView,
   Share,
-  Alert,
+  InteractionManager,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/routes';
@@ -17,8 +18,7 @@ import { Header } from '@/components/Header';
 import { ToneSelector } from '@/components/ToneSelector';
 import { rewrite } from '@/ml/slm';
 import { Tone } from '@/ml/types';
-import { useSettingsStore } from '@/state/useSettingsStore';
-import { lightTheme, darkTheme } from '@/utils/theme';
+import { useSystemTheme } from '@/utils/theme';
 import { haptics } from '@/utils/haptics';
 import { logger } from '@/utils/logger';
 
@@ -28,8 +28,7 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Result'>;
 export const ResultScreen: React.FC = () => {
   const route = useRoute<ResultScreenRouteProp>();
   const navigation = useNavigation<NavigationProp>();
-  const themeMode = useSettingsStore((s) => s.themeMode);
-  const theme = themeMode === 'dark' ? darkTheme : lightTheme;
+  const theme = useSystemTheme();
 
   const { result } = route.params;
 
@@ -38,7 +37,7 @@ export const ResultScreen: React.FC = () => {
       <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]}>
         <Header title="Error" onBack={() => navigation.navigate('Home')} />
         <View style={styles.content}>
-          <Text style={[styles.rawToggleText, { color: theme.danger, marginVertical: 20 }]}>
+          <Text style={[styles.sectionTitle, { color: theme.danger, marginVertical: 20 }]}>
             {result.message}
           </Text>
           <TouchableOpacity
@@ -52,69 +51,74 @@ export const ResultScreen: React.FC = () => {
     );
   }
 
+  const rawText = result.raw;
+  const expectedToneRef = useRef<Tone>(result.tone);
   const [currentTone, setCurrentTone] = useState<Tone>(result.tone);
-  const [displayText, setDisplayText] = useState<string>(result.final);
-  const [isShowingRaw, setIsShowingRaw] = useState<boolean>(false);
+  const [rewrittenText, setRewrittenText] = useState<string>(result.final);
+  const [isFallback, setIsFallback] = useState<boolean>(result.usedFallback);
   const [isReRewriting, setIsReRewriting] = useState<boolean>(false);
   const [copiedToast, setCopiedToast] = useState<boolean>(false);
 
+  // Keep the RAW and REWRITTEN transcripts visible simultaneously so the user
+  // always sees exactly what was captured vs what was transformed.
+
   // Handle instant re-rewrite when user changes tone pill without re-recording
   const handleToneChange = async (newTone: Tone): Promise<void> => {
-    if (newTone === currentTone || isReRewriting) return;
+    if (newTone === expectedToneRef.current) return;
 
+    expectedToneRef.current = newTone;
     setCurrentTone(newTone);
     setIsReRewriting(true);
     haptics.trigger('impactLight');
 
     try {
       const slmResult = await rewrite(result.raw, newTone, { lang: result.lang });
-      if (slmResult.status === 'ok') {
-        setDisplayText(slmResult.final);
-        setIsShowingRaw(false);
-      } else {
-        setDisplayText(slmResult.fallbackText);
-      }
+      if (expectedToneRef.current !== newTone) return;
+
+      InteractionManager.runAfterInteractions(() => {
+        if (expectedToneRef.current !== newTone) return;
+
+        if (slmResult.status === 'ok') {
+          setRewrittenText(slmResult.final);
+          setIsFallback(false);
+        } else {
+          setRewrittenText(slmResult.fallbackText);
+          setIsFallback(true);
+        }
+      });
     } catch (err) {
-      logger.error('ResultScreen', 'Failed to re-rewrite tone', err);
+      if (expectedToneRef.current === newTone) {
+        logger.error('ResultScreen', 'Failed to re-rewrite tone', err);
+      }
     } finally {
-      setIsReRewriting(false);
+      if (expectedToneRef.current === newTone) {
+        setIsReRewriting(false);
+      }
     }
   };
 
-  const handleToggleRaw = (): void => {
-    haptics.trigger('impactLight');
-    if (isShowingRaw) {
-      setIsShowingRaw(false);
-      // Restore rewritten text
-      setDisplayText(result.final);
-    } else {
-      setIsShowingRaw(true);
-      setDisplayText(result.raw);
-    }
-  };
-
-  const handleCopy = async (): Promise<void> => {
+  const handleCopy = async (text: string): Promise<void> => {
     haptics.trigger('success');
-    // Copy text to clipboard
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const Clipboard = require('@react-native-clipboard/clipboard');
-      if (Clipboard?.setString) {
-        Clipboard.setString(displayText);
+      if (Clipboard && typeof Clipboard.setString === 'function') {
+        Clipboard.setString(text);
       }
     } catch {
       // In web/fallback
     }
 
     setCopiedToast(true);
-    setTimeout(() => setCopiedToast(false), 2000);
+    const timer = setTimeout(() => setCopiedToast(false), 2000);
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
   };
 
   const handleShare = async (): Promise<void> => {
     haptics.trigger('impactLight');
     try {
       await Share.share({
-        message: displayText,
+        message: rewrittenText,
         title: 'VoiceNote Export',
       });
     } catch (err) {
@@ -140,47 +144,50 @@ export const ResultScreen: React.FC = () => {
         <ToneSelector
           selectedTone={currentTone}
           onSelectTone={handleToneChange}
-          disabled={isReRewriting}
         />
 
-        {/* Action / Mode row */}
-        <View style={styles.utilityRow}>
-          <TouchableOpacity
-            style={[
-              styles.rawToggleChip,
-              {
-                backgroundColor: isShowingRaw ? theme.primaryLight : theme.surfaceSubtle,
-                borderColor: isShowingRaw ? theme.primary : theme.border,
-              },
-            ]}
-            onPress={handleToggleRaw}
-            accessible={true}
-            accessibilityRole="button"
-            accessibilityLabel={isShowingRaw ? 'Viewing original raw transcript' : 'Viewing rewritten text'}
-          >
-            <Text style={[styles.rawToggleText, { color: isShowingRaw ? theme.primary : theme.textSecondary }]}>
-              {isShowingRaw ? '📝 Showing Raw' : '✨ Showing Rewritten'}
-            </Text>
-          </TouchableOpacity>
+        {isReRewriting && (
+          <Text style={[styles.reRewritingText, { color: theme.accent }]}>Rewriting...</Text>
+        )}
 
-          {isReRewriting && (
-            <Text style={[styles.reRewritingText, { color: theme.accent }]}>
-              Rewriting...
+        {/* RAW transcript: exactly what speech-to-text captured */}
+        <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={styles.cardHeaderRow}>
+            <Text style={[styles.cardLabel, { color: theme.textMuted }]}>AS SPOKEN</Text>
+            <Text style={[styles.rawChip, { backgroundColor: theme.surfaceSubtle, color: theme.textSecondary }]}>
+              Raw transcript
             </Text>
-          )}
+          </View>
+          <Text style={[styles.rawText, { color: theme.textPrimary }]}>
+            {rawText}
+          </Text>
         </View>
 
-        {/* Editable note card */}
+        {/* REWRITTEN transcript: tone-transformed content */}
         <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={styles.cardHeaderRow}>
+            <Text style={[styles.cardLabel, { color: theme.accent }]}>
+              REWRITTEN • {currentTone.toUpperCase()}
+            </Text>
+            {isFallback ? (
+              <Text style={[styles.fallbackChip, { backgroundColor: theme.warningLight, color: theme.warning }]}>
+                Raw used
+              </Text>
+            ) : (
+              <Text style={[styles.rawChip, { backgroundColor: theme.primaryLight, color: theme.primary }]}>
+                ✨ Transformed
+              </Text>
+            )}
+          </View>
           <TextInput
             style={[styles.textInput, { color: theme.textPrimary }]}
-            value={displayText}
-            onChangeText={setDisplayText}
+            value={rewrittenText}
+            onChangeText={setRewrittenText}
             multiline
-            placeholder="Note content..."
+            placeholder="Rewritten content..."
             placeholderTextColor={theme.textMuted}
             accessible={true}
-            accessibilityLabel="Editable note content"
+            accessibilityLabel="Editable rewritten note content"
           />
         </View>
 
@@ -188,10 +195,10 @@ export const ResultScreen: React.FC = () => {
         <View style={styles.actionRow}>
           <TouchableOpacity
             style={[styles.actionButton, { backgroundColor: theme.primary }]}
-            onPress={handleCopy}
+            onPress={() => handleCopy(rewrittenText)}
             accessible={true}
             accessibilityRole="button"
-            accessibilityLabel="Copy text to clipboard"
+            accessibilityLabel="Copy rewritten text to clipboard"
           >
             <Text style={styles.actionButtonText}>
               {copiedToast ? '✓ Copied!' : '📋 Copy'}
@@ -203,7 +210,7 @@ export const ResultScreen: React.FC = () => {
             onPress={handleShare}
             accessible={true}
             accessibilityRole="button"
-            accessibilityLabel="Share text via native sheet"
+            accessibilityLabel="Share rewritten text via native sheet"
           >
             <Text style={styles.actionButtonText}>📤 Share</Text>
           </TouchableOpacity>
@@ -230,46 +237,67 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
   },
-  utilityRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginVertical: 10,
-  },
-  rawToggleChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  rawToggleText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
   reRewritingText: {
     fontSize: 13,
     fontWeight: '600',
+    marginBottom: 10,
   },
   card: {
     borderRadius: 12,
     borderWidth: 1,
-    minHeight: 180,
     padding: 16,
-    marginBottom: 20,
+    marginBottom: 16,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 1,
   },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  cardLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  rawChip: {
+    fontSize: 11,
+    fontWeight: '600',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  fallbackChip: {
+    fontSize: 11,
+    fontWeight: '600',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  rawText: {
+    fontSize: 15,
+    lineHeight: 22,
+  },
   textInput: {
     fontSize: 16,
     lineHeight: 24,
     textAlignVertical: 'top',
+    minHeight: 80,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
   },
   actionRow: {
     flexDirection: 'row',
     gap: 12,
+    marginTop: 4,
   },
   actionButton: {
     flex: 1,

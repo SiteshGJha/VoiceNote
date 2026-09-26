@@ -1,4 +1,5 @@
 import { VadConfig, VAD_PRESETS, VadSensitivity } from './vadPresets';
+import { webrtcVad } from '@/native/webrtcVad';
 import { calculateRms } from './wavUtils';
 import { logger } from '@/utils/logger';
 
@@ -12,6 +13,7 @@ export interface VadCallbacks {
 }
 
 export class VadGate {
+  private preset: VadSensitivity;
   private config: VadConfig;
   private state: VadState = 'idle';
   private speechDetected = false;
@@ -21,11 +23,13 @@ export class VadGate {
   private callbacks: VadCallbacks;
 
   constructor(preset: VadSensitivity = 'medium', callbacks: VadCallbacks = {}) {
+    this.preset = preset;
     this.config = { ...VAD_PRESETS[preset] };
     this.callbacks = callbacks;
   }
 
   public setSensitivity(preset: VadSensitivity): void {
+    this.preset = preset;
     this.config = { ...VAD_PRESETS[preset] };
     logger.info('VadGate', `VAD sensitivity updated to ${preset}`, this.config);
   }
@@ -55,9 +59,9 @@ export class VadGate {
     probability: number;
     state: VadState;
   } {
-    const { normalized } = calculateRms(frameBytes);
-    // Probability scaled between 0 and 1
-    const probability = normalized;
+    const vadResult = webrtcVad.evaluateFrame(frameBytes, this.preset);
+    const probability = vadResult.probability;
+    // Frame is speech if probability exceeds configured threshold
     const isSpeech = probability >= this.config.speechThreshold;
     const frameDurationMs = this.config.frameMs;
 

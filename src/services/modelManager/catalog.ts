@@ -82,3 +82,15 @@ export const MODEL_CATALOG: ModelSpec[] = [
     minRamGb: 2,
   },
 ];
+
+export function getModelSpec(id: string): ModelSpec | undefined {
+  return MODEL_CATALOG.find((m) => m.id === id);
+}
+
+export function getModelDestinationSubdir(kind: ModelKind): string {
+  return kind; // 'asr' | 'slm'
+}
+
+export function getModelFileName(spec: ModelSpec): string {
+  return `${spec.id}-${spec.quant}.gguf`;
+}

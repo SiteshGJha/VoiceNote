@@ -1,29 +1,97 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { InstalledModel, ModelSpec, MODEL_CATALOG } from './catalog';
+import { InstalledModel, ModelSpec, MODEL_CATALOG, getModelSpec, getModelDestinationSubdir } from './catalog';
 import { modelDownloader, ProgressCallback } from './downloader';
+import { verifyChecksum } from './verifier';
 import { asrModelRegistry } from '@/ml/asr/modelRegistry';
+import { slmModelRegistry } from '@/ml/slm/modelRegistry';
 import { logger } from '@/utils/logger';
 
 class ModelInstallerService {
   private installedModels: Map<string, InstalledModel> = new Map();
   private modelsDir: string;
+  private manifestPath: string;
 
   constructor() {
     this.modelsDir = path.join(os.homedir(), '.voicenote', 'models');
-    // Pre-populate with default installed base model
-    const baseSpec = MODEL_CATALOG.find((m) => m.id === 'whisper-base-multilingual');
-    if (baseSpec) {
+    this.manifestPath = path.join(this.modelsDir, 'installed_models.json');
+    this.initializeFromStorage();
+  }
+
+  private initializeFromStorage(): void {
+    // 1. Ensure root models directory exists
+    try {
+      if (!fs.existsSync(this.modelsDir)) {
+        fs.mkdirSync(this.modelsDir, { recursive: true });
+      }
+    } catch (err) {
+      logger.warn('ModelInstaller', 'Could not create models directory on startup', err);
+    }
+
+    // 2. Load persisted manifest if present
+    if (fs.existsSync(this.manifestPath)) {
+      try {
+        const raw = fs.readFileSync(this.manifestPath, 'utf8');
+        const list: InstalledModel[] = JSON.parse(raw);
+        for (const item of list) {
+          if (fs.existsSync(item.localPath)) {
+            this.installedModels.set(item.id, item);
+            if (item.kind === 'asr') {
+              asrModelRegistry.registerInstalledModel(item.id, item.localPath);
+            } else if (item.kind === 'slm') {
+              slmModelRegistry.registerInstalledModel(item.id, item.localPath);
+            }
+          }
+        }
+      } catch (err) {
+        logger.warn('ModelInstaller', 'Failed to read installed models manifest', err);
+      }
+    }
+
+    // 3. In testing/initial state: seed default installed base ASR model if not already set
+    const baseSpec = getModelSpec('whisper-base-multilingual');
+    if (baseSpec && !this.installedModels.has(baseSpec.id)) {
+      const defaultPath = path.join(this.modelsDir, 'asr', `${baseSpec.id}.gguf`);
       this.installedModels.set(baseSpec.id, {
         id: baseSpec.id,
         kind: baseSpec.kind,
         displayName: baseSpec.displayName,
         sizeBytes: baseSpec.sizeBytes,
         version: baseSpec.version,
-        localPath: path.join(this.modelsDir, 'asr', `${baseSpec.id}.gguf`),
+        localPath: defaultPath,
         installedAt: new Date().toISOString(),
       });
+      asrModelRegistry.registerInstalledModel(baseSpec.id, defaultPath);
+    }
+
+    // 4. Seed default installed SLM model if not already set
+    const defaultSlmSpec = getModelSpec('qwen2.5-0.5b-instruct');
+    if (defaultSlmSpec && !this.installedModels.has(defaultSlmSpec.id)) {
+      const defaultSlmPath = path.join(this.modelsDir, 'slm', `${defaultSlmSpec.id}-${defaultSlmSpec.quant}.gguf`);
+      this.installedModels.set(defaultSlmSpec.id, {
+        id: defaultSlmSpec.id,
+        kind: defaultSlmSpec.kind,
+        displayName: defaultSlmSpec.displayName,
+        sizeBytes: defaultSlmSpec.sizeBytes,
+        version: defaultSlmSpec.version,
+        localPath: defaultSlmPath,
+        installedAt: new Date().toISOString(),
+      });
+      slmModelRegistry.registerInstalledModel(defaultSlmSpec.id, defaultSlmPath);
+    }
+  }
+
+  private persistManifest(): void {
+    try {
+      const dir = path.dirname(this.manifestPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const data = JSON.stringify(Array.from(this.installedModels.values()), null, 2);
+      fs.writeFileSync(this.manifestPath, data, 'utf8');
+    } catch (err) {
+      logger.warn('ModelInstaller', 'Failed to persist installed models manifest', err);
     }
   }
 
@@ -51,14 +119,25 @@ class ModelInstallerService {
     return total;
   }
 
+  /**
+   * Public convenience method matching SKILL.md: download(id, onProgress)
+   */
+  public async download(id: string, onProgress?: (pct: number) => void): Promise<void> {
+    await this.installModel(id, onProgress ? (pct) => onProgress(pct) : undefined);
+  }
+
+  /**
+   * Downloads, verifies, and registers a model specification.
+   */
   public async installModel(id: string, onProgress?: ProgressCallback): Promise<InstalledModel> {
-    const spec = MODEL_CATALOG.find((m) => m.id === id);
+    const spec = getModelSpec(id);
     if (!spec) {
       throw new Error(`Model specification not found for ID: ${id}`);
     }
 
-    const subDir = path.join(this.modelsDir, spec.kind);
-    const localPath = await modelDownloader.downloadModel(spec, subDir, onProgress);
+    const subDirName = getModelDestinationSubdir(spec.kind);
+    const targetDir = path.join(this.modelsDir, subDirName);
+    const localPath = await modelDownloader.downloadModel(spec, targetDir, onProgress);
 
     const installed: InstalledModel = {
       id: spec.id,
@@ -71,15 +150,28 @@ class ModelInstallerService {
     };
 
     this.installedModels.set(spec.id, installed);
+    this.persistManifest();
 
     if (spec.kind === 'asr') {
       asrModelRegistry.registerInstalledModel(spec.id, localPath);
+    } else if (spec.kind === 'slm') {
+      slmModelRegistry.registerInstalledModel(spec.id, localPath);
     }
 
     logger.info('ModelInstaller', `Model ${spec.id} registered and ready`);
     return installed;
   }
 
+  /**
+   * Public convenience method matching SKILL.md: remove(id)
+   */
+  public async remove(id: string): Promise<void> {
+    await this.deleteModel(id);
+  }
+
+  /**
+   * Uninstalls model from filesystem, unregisters from runtime engines, and removes from manifest.
+   */
   public async deleteModel(id: string): Promise<boolean> {
     const model = this.installedModels.get(id);
     if (!model) {
@@ -91,9 +183,12 @@ class ModelInstallerService {
         fs.unlinkSync(model.localPath);
       }
       this.installedModels.delete(id);
+      this.persistManifest();
 
       if (model.kind === 'asr') {
         asrModelRegistry.unregisterModel(id);
+      } else if (model.kind === 'slm') {
+        slmModelRegistry.unregisterModel(id);
       }
 
       logger.info('ModelInstaller', `Model ${id} deleted successfully`);
@@ -102,6 +197,25 @@ class ModelInstallerService {
       logger.error('ModelInstaller', `Failed to delete model file: ${model.localPath}`, err);
       return false;
     }
+  }
+
+  /**
+   * Verifies SHA-256 integrity of an installed model file against the catalog.
+   */
+  public async verify(id: string): Promise<boolean> {
+    const model = this.installedModels.get(id);
+    const spec = getModelSpec(id);
+    if (!model || !spec) {
+      logger.warn('ModelInstaller', `Cannot verify model ${id}: not found in installed records or catalog`);
+      return false;
+    }
+
+    if (!fs.existsSync(model.localPath)) {
+      logger.warn('ModelInstaller', `Model file does not exist on disk: ${model.localPath}`);
+      return false;
+    }
+
+    return verifyChecksum(model.localPath, spec.sha256);
   }
 }
 

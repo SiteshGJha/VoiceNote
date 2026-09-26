@@ -7,11 +7,15 @@ import {
   SafeAreaView,
   Alert,
   ActivityIndicator,
+  InteractionManager,
+  Platform,
+  PermissionsAndroid,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/routes';
 import { useAudioRecorder } from '@/audio/useAudioRecorder';
+import { nativeAudio } from '@/native/nativeAudio';
 import { VadGate } from '@/audio/vadGate';
 import { Waveform } from '@/components/Waveform';
 import { ToneSelector } from '@/components/ToneSelector';
@@ -21,7 +25,7 @@ import { executePipeline } from '@/pipeline/orchestrator';
 import { useSettingsStore } from '@/state/useSettingsStore';
 import { useAppStore } from '@/state/useAppStore';
 import { modelInstaller } from '@/services/modelManager';
-import { lightTheme, darkTheme } from '@/utils/theme';
+import { useSystemTheme } from '@/utils/theme';
 import { haptics } from '@/utils/haptics';
 import { logger } from '@/utils/logger';
 
@@ -29,24 +33,37 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
 export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
-  const themeMode = useSettingsStore((s) => s.themeMode);
-  const theme = themeMode === 'dark' ? darkTheme : lightTheme;
+  const theme = useSystemTheme();
 
   const defaultTone = useSettingsStore((s) => s.defaultTone);
   const defaultLang = useSettingsStore((s) => s.defaultLanguage);
   const vadSensitivity = useSettingsStore((s) => s.vadSensitivity);
   const hindiOutputFormat = useSettingsStore((s) => s.hindiOutputFormat);
 
-  const { stage, setStage, activeTone, setActiveTone, activeLanguage, setActiveLanguage, setError } =
-    useAppStore();
+  const {
+    stage,
+    setStage,
+    activeTone,
+    setActiveTone,
+    activeLanguage,
+    setActiveLanguage,
+    setError,
+    setMetrics,
+  } = useAppStore();
 
-  const [permissionGranted, setPermissionGranted] = useState(true);
+  const [permissionGranted, setPermissionGranted] = useState<boolean | null>(null);
   const [pipelineStep, setPipelineStep] = useState<string>('');
 
-  const { recordingState, durationMs, amplitude, start, stop, cancel } = useAudioRecorder();
-
-  // Initialize VAD gate with user sensitivity
   const vadGateRef = useRef<VadGate | null>(null);
+  const handleStopRecordingRef = useRef<(() => Promise<void>) | null>(null);
+  const isFinalizingRef = useRef<boolean>(false);
+  const isStartingRef = useRef<boolean>(false);
+
+  const { recordingState, durationMs, amplitude, start, stop, cancel } = useAudioRecorder({
+    onFrame: (chunk) => {
+      vadGateRef.current?.processFrame(chunk);
+    },
+  });
 
   useEffect(() => {
     setActiveTone(defaultTone);
@@ -54,10 +71,61 @@ export const HomeScreen: React.FC = () => {
   }, [defaultTone, defaultLang, setActiveTone, setActiveLanguage]);
 
   useEffect(() => {
+    const checkMicPermission = async () => {
+      if (!nativeAudio.isNativeAvailable) {
+        setPermissionGranted(true);
+        return;
+      }
+
+      if (Platform.OS === 'android' && PermissionsAndroid?.check) {
+        try {
+          const micPerm = PermissionsAndroid.PERMISSIONS.RECORD_AUDIO;
+          if (micPerm) {
+            const granted = await PermissionsAndroid.check(micPerm);
+            setPermissionGranted(granted);
+          } else {
+            setPermissionGranted(true);
+          }
+        } catch {
+          setPermissionGranted(false);
+        }
+      } else {
+        setPermissionGranted(true);
+      }
+    };
+
+    checkMicPermission();
+  }, []);
+
+  const handleRequestPermission = async (): Promise<void> => {
+    if (Platform.OS === 'android' && PermissionsAndroid?.request) {
+      try {
+        const micPerm = PermissionsAndroid.PERMISSIONS.RECORD_AUDIO;
+        if (micPerm) {
+          const result = await PermissionsAndroid.request(micPerm);
+          setPermissionGranted(result === PermissionsAndroid.RESULTS.GRANTED);
+        } else {
+          setPermissionGranted(true);
+        }
+      } catch {
+        setPermissionGranted(false);
+      }
+    } else {
+      setPermissionGranted(true);
+    }
+  };
+
+  useEffect(() => {
     vadGateRef.current = new VadGate(vadSensitivity, {
+      onSpeechStart: () => {
+        logger.info('HomeScreen', 'VAD detected speech start');
+      },
+      onSpeechEnd: () => {
+        logger.info('HomeScreen', 'VAD detected speech end, entering silence window');
+      },
       onAutoStop: () => {
         logger.info('HomeScreen', 'VAD auto-stop triggered');
-        handleStopRecording();
+        handleStopRecordingRef.current?.();
       },
       onNoSpeech: () => {
         logger.info('HomeScreen', 'VAD detected no speech');
@@ -66,12 +134,22 @@ export const HomeScreen: React.FC = () => {
   }, [vadSensitivity]);
 
   const handleStartRecording = async (): Promise<void> => {
-    // Model guard: verify ASR model is available
-    const hasBaseModel = modelInstaller.isInstalled('whisper-base-multilingual');
-    if (!hasBaseModel) {
+    if (isStartingRef.current) {
+      logger.info('HomeScreen', 'Start already in progress, ignoring duplicate trigger');
+      return;
+    }
+    isStartingRef.current = true;
+
+    // Model guard: verify both ASR and SLM models are installed
+    const installed = modelInstaller.listInstalled();
+    const hasAsr = installed.some((m) => m.kind === 'asr');
+    const hasSlm = installed.some((m) => m.kind === 'slm');
+
+    if (!hasAsr || !hasSlm) {
+      isStartingRef.current = false;
       Alert.alert(
-        'Model Required',
-        'Please download the speech recognition model from the Models screen before recording.',
+        'Models Required',
+        'Please download both speech recognition and tone rewriting models from the Models screen before recording.',
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Open Models', onPress: () => navigation.navigate('Models') },
@@ -81,16 +159,27 @@ export const HomeScreen: React.FC = () => {
     }
 
     try {
+      isFinalizingRef.current = false;
       vadGateRef.current?.reset();
       setStage('recording');
       await start();
     } catch (err) {
       logger.error('HomeScreen', 'Failed to start recording', err);
       setError('AUDIO_RECORD_FAILED', 'Could not access microphone.');
+    } finally {
+      isStartingRef.current = false;
     }
   };
 
   const handleStopRecording = async (): Promise<void> => {
+    // Debounce: VAD auto-stop and manual tap may both trigger; finalize once.
+    if (isFinalizingRef.current) {
+      logger.info('HomeScreen', 'Stop already in progress, ignoring duplicate trigger');
+      return;
+    }
+    isFinalizingRef.current = true;
+
+    const pipelineStartTime = Date.now();
     try {
       setStage('transcribing');
       setPipelineStep('Finalizing audio...');
@@ -98,6 +187,17 @@ export const HomeScreen: React.FC = () => {
 
       if (!audio) {
         setStage('idle');
+        return;
+      }
+
+      // VAD & Silence Trimming guard: If audio is 100% silence, short-circuit before ASR
+      if (audio.hasSpeech === false) {
+        setStage('idle');
+        Alert.alert(
+          'No Speech Detected',
+          'No voice was detected in the audio recording. Please speak clearly into the microphone and try again.',
+          [{ text: 'OK' }]
+        );
         return;
       }
 
@@ -111,8 +211,10 @@ export const HomeScreen: React.FC = () => {
         },
         (currentStage) => {
           if (currentStage === 'asr') {
+            setStage('transcribing');
             setPipelineStep('Transcribing speech offline...');
           } else if (currentStage === 'slm') {
+            setStage('rewriting');
             setPipelineStep('Rewriting tone on-device...');
           } else if (currentStage === 'saving') {
             setPipelineStep('Encrypting note...');
@@ -120,21 +222,41 @@ export const HomeScreen: React.FC = () => {
         }
       );
 
+      const totalElapsed = Date.now() - pipelineStartTime;
       if (result.status === 'ok') {
-        haptics.trigger('success');
-        setStage('idle');
-        navigation.navigate('Result', { result });
+        setMetrics({
+          totalDurationMs: totalElapsed,
+          asrDurationMs: result.asrDurationMs,
+          slmDurationMs: result.slmDurationMs,
+        });
       } else {
-        haptics.trigger('error');
-        setStage('error');
-        setError(result.code, result.message);
-        Alert.alert('Transcription Notice', result.message, [{ text: 'OK' }]);
+        setMetrics({
+          totalDurationMs: totalElapsed,
+        });
       }
+
+      // Off-main-thread responsiveness: run UI transition after interactions complete
+      InteractionManager.runAfterInteractions(() => {
+        if (result.status === 'ok') {
+          haptics.trigger('success');
+          setStage('idle');
+          navigation.navigate('Result', { result });
+        } else {
+          haptics.trigger('error');
+          setStage('error');
+          setError(result.code, result.message);
+          Alert.alert('Transcription Notice', result.message, [{ text: 'OK' }]);
+        }
+      });
     } catch (err) {
       logger.error('HomeScreen', 'Error in pipeline execution', err);
       setStage('idle');
+    } finally {
+      isFinalizingRef.current = false;
     }
   };
+
+  handleStopRecordingRef.current = handleStopRecording;
 
   const isRecording = recordingState === 'recording';
   const isProcessing = stage === 'transcribing' || stage === 'rewriting';
@@ -176,8 +298,8 @@ export const HomeScreen: React.FC = () => {
       </View>
 
       <PermissionGate
-        permissionGranted={permissionGranted}
-        onRequestPermission={() => setPermissionGranted(true)}
+        permissionGranted={permissionGranted ?? true}
+        onRequestPermission={handleRequestPermission}
       />
 
       {/* Main recording body */}

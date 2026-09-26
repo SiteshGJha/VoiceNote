@@ -18,6 +18,7 @@ export interface RecordedAudio {
   sampleRate: number;
   channels: number;
   byteLength: number;
+  hasSpeech?: boolean;
 }
 
 export interface AudioMeteringData {

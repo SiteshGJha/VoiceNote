@@ -11,24 +11,26 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { Header } from '@/components/Header';
 import { ProgressBar } from '@/components/ProgressBar';
-import { modelInstaller, ModelSpec } from '@/services/modelManager';
-import { useSettingsStore } from '@/state/useSettingsStore';
-import { lightTheme, darkTheme } from '@/utils/theme';
+import { modelInstaller, ModelSpec, storageQuota, StorageQuotaInfo } from '@/services/modelManager';
+import { useSystemTheme } from '@/utils/theme';
 import { haptics } from '@/utils/haptics';
 
 export const ModelsScreen: React.FC = () => {
   const navigation = useNavigation();
-  const themeMode = useSettingsStore((s) => s.themeMode);
-  const theme = themeMode === 'dark' ? darkTheme : lightTheme;
+  const theme = useSystemTheme();
 
   const [availableModels, setAvailableModels] = useState<ModelSpec[]>([]);
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [totalStorageBytes, setTotalStorageBytes] = useState(0);
+  const [quotaInfo, setQuotaInfo] = useState<StorageQuotaInfo | null>(null);
 
-  const refreshModels = (): void => {
+  const refreshModels = async (): Promise<void> => {
     setAvailableModels(modelInstaller.listAvailable());
-    setTotalStorageBytes(modelInstaller.getTotalStorageUsageBytes());
+    const usedBytes = modelInstaller.getTotalStorageUsageBytes();
+    setTotalStorageBytes(usedBytes);
+    const info = await storageQuota.getStorageQuotaInfo(usedBytes);
+    setQuotaInfo(info);
   };
 
   useEffect(() => {
@@ -58,6 +60,18 @@ export const ModelsScreen: React.FC = () => {
         return next;
       });
       refreshModels();
+    }
+  };
+
+  const handleVerify = async (model: ModelSpec): Promise<void> => {
+    haptics.trigger('impactLight');
+    const isValid = await modelInstaller.verify(model.id);
+    if (isValid) {
+      haptics.trigger('success');
+      Alert.alert('Integrity Verified', `${model.displayName} SHA-256 checksum verified.`);
+    } else {
+      haptics.trigger('error');
+      Alert.alert('Verification Notice', `${model.displayName} checksum mismatch or file missing.`);
     }
   };
 
@@ -123,15 +137,26 @@ export const ModelsScreen: React.FC = () => {
           </View>
 
           {isInstalled ? (
-            <TouchableOpacity
-              style={[styles.deleteButton, { borderColor: theme.dangerSurface }]}
-              onPress={() => handleDelete(item)}
-              accessible={true}
-              accessibilityRole="button"
-              accessibilityLabel={`Delete ${item.displayName}`}
-            >
-              <Text style={[styles.deleteButtonText, { color: theme.danger }]}>Delete</Text>
-            </TouchableOpacity>
+            <View style={styles.actionButtons}>
+              <TouchableOpacity
+                style={[styles.verifyButton, { borderColor: theme.border }]}
+                onPress={() => handleVerify(item)}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel={`Verify ${item.displayName}`}
+              >
+                <Text style={[styles.verifyButtonText, { color: theme.textSecondary }]}>Verify</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.deleteButton, { borderColor: theme.dangerSurface }]}
+                onPress={() => handleDelete(item)}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel={`Delete ${item.displayName}`}
+              >
+                <Text style={[styles.deleteButtonText, { color: theme.danger }]}>Delete</Text>
+              </TouchableOpacity>
+            </View>
           ) : (
             <TouchableOpacity
               style={[styles.downloadButton, { backgroundColor: theme.primary }]}
@@ -164,8 +189,10 @@ export const ModelsScreen: React.FC = () => {
         <Text style={[styles.storageTitle, { color: theme.textPrimary }]}>Local Storage Used</Text>
         <Text style={[styles.storageValue, { color: theme.primary }]}>
           {formatSize(totalStorageBytes)}
+          {quotaInfo && ` / ${formatSize(quotaInfo.quotaBytes)} (${quotaInfo.percentUsed.toFixed(0)}%)`}
         </Text>
         <Text style={[styles.storageNote, { color: theme.textMuted }]}>
+          {quotaInfo ? `Free disk space: ${formatSize(quotaInfo.freeDiskBytes)}. ` : ''}
           Models run 100% locally on your phone hardware with zero network calls during inference.
         </Text>
       </View>
@@ -257,6 +284,20 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 12,
     fontWeight: '500',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  verifyButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  verifyButtonText: {
+    fontWeight: '600',
+    fontSize: 13,
   },
   downloadButton: {
     paddingVertical: 8,

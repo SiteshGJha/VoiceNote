@@ -1,0 +1,39 @@
+require_relative '../node_modules/react-native-macos/scripts/react_native_pods'
+
+prepare_react_native_project!
+
+target 'voicenote-macOS' do
+  platform :macos, '12.0'
+  use_native_modules!
+
+  # Flags change depending on the env values.
+  flags = get_default_flags()
+
+  use_react_native!(
+    :path => '../node_modules/react-native-macos',
+    :hermes_enabled => false,
+    :fabric_enabled => ENV['RCT_NEW_ARCH_ENABLED'] == '1',
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  post_install do |installer|
+    react_native_post_install(installer)
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['MACOSX_DEPLOYMENT_TARGET'] = '12.0'
+        if target.name == 'fmt'
+          config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
+        end
+      end
+      if target.respond_to?(:source_build_phase) && target.source_build_phase
+        target.source_build_phase.files.each do |file|
+          if file.settings && file.settings['COMPILER_FLAGS']
+            file.settings['COMPILER_FLAGS'] = file.settings['COMPILER_FLAGS'].gsub('-DOS_OBJECT_USE_OBJC=0', '').strip
+          end
+        end
+      end
+    end
+    installer.pods_project.save
+  end
+end

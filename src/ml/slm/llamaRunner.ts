@@ -1,73 +1,30 @@
-import { MlError } from '../errors';
-import { SLM_GENERATION_PARAMS } from './promptBuilder';
-import { logger } from '@/utils/logger';
-
-const SLM_TIMEOUT_MS = 10_000; // 10s timeout per 02-on-device-ml-safety.md
+import { llamaNative } from '@/native/llamaNative';
+import { SLM_PARAMS } from './promptBuilder';
 
 export interface LlamaParams {
   prompt: string;
-  timeoutMs?: number;
-  temperature?: number;
+  modelPath?: string | undefined;
+  timeoutMs?: number | undefined;
+  temperature?: number | undefined;
+  topP?: number | undefined;
+  maxTokens?: number | undefined;
 }
 
 /**
  * Off-thread Small Language Model runner (llama.rn / GGUF).
- * Constrains generation and aborts after 10 s timeout.
+ * Delegates to native Llama bridge with 10s timeout protection and 60s idle auto-unloading.
  */
 export async function runLlamaInference(params: LlamaParams): Promise<string> {
-  const timeoutMs = params.timeoutMs ?? SLM_TIMEOUT_MS;
-
-  const generationPromise = new Promise<string>((resolve) => {
-    // In production, delegates to llama.rn on a background thread
-    // In simulation / test mode, apply prompt-aware rewriting
-    const timer = setTimeout(() => {
-      const prompt = params.prompt;
-      const inputMarker = 'Input:';
-      const outputMarker = 'Output:';
-      const inputIndex = prompt.indexOf(inputMarker);
-      const outputIndex = prompt.lastIndexOf(outputMarker);
-
-      let rawInput = '';
-      if (inputIndex !== -1 && outputIndex !== -1) {
-        rawInput = prompt.slice(inputIndex + inputMarker.length, outputIndex).trim();
-      } else {
-        rawInput = prompt;
-      }
-
-      // Simulate clean rewriting
-      let rewritten = rawInput;
-      if (prompt.includes('professional')) {
-        // Remove common fillers
-        rewritten = rawInput
-          .replace(/\b(um|uh|like|you know|matlab|arre)\b/gi, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        // Capitalize first letter and ensure ending punctuation
-        if (rewritten.length > 0) {
-          rewritten = rewritten.charAt(0).toUpperCase() + rewritten.slice(1);
-          if (!/[.!?]$/.test(rewritten)) {
-            rewritten += '.';
-          }
-        }
-      } else {
-        // Casual rewrite
-        rewritten = rawInput
-          .replace(/\b(um|uh|matlab|arre)\b/gi, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-      }
-
-      resolve(rewritten);
-    }, 150);
-
-    return () => clearTimeout(timer);
+  const modelPath = params.modelPath ?? '/models/slm/qwen2.5-0.5b-instruct-q4_k_m.gguf';
+  const result = await llamaNative.generate({
+    modelPath,
+    prompt: params.prompt,
+    temperature: params.temperature ?? SLM_PARAMS.temperature,
+    topP: params.topP ?? SLM_PARAMS.topP,
+    maxTokens: params.maxTokens ?? SLM_PARAMS.maxTokens,
+    stopSequences: SLM_PARAMS.stop,
+    timeoutMs: params.timeoutMs,
   });
 
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => {
-      reject(new MlError('SLM_TIMEOUT', `SLM rewrite timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-  });
-
-  return Promise.race([generationPromise, timeoutPromise]);
+  return result.text;
 }
