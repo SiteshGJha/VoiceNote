@@ -9,10 +9,11 @@ type EffectRecord = {
 export interface RenderResult {
   rerender: (newElement: React.ReactElement) => void;
   getByRole: (role: string) => any;
-  getByLabelText: (label: string) => any;
+  getByLabelText: (label: string | RegExp) => any;
   getByTestId: (testId: string) => any;
   queryByTestId: (testId: string) => any;
   getByText: (matcher: string | RegExp) => any;
+  queryByText: (matcher: string | RegExp) => any;
   findByText: (matcher: string | RegExp, options?: { timeout?: number; interval?: number }) => Promise<any>;
   findByTestId: (testId: string, options?: { timeout?: number; interval?: number }) => Promise<any>;
   UNSAFE_getByType: (type: any) => any;
@@ -141,6 +142,37 @@ export function render(element: React.ReactElement): RenderResult {
     useDebugValue: () => {},
   };
 
+  const renderNode = (node: any): any => {
+    if (!node) return node;
+    if (typeof node.type === 'function') {
+      try {
+        const rendered = node.type(node.props);
+        return renderNode(rendered);
+      } catch {
+        return node;
+      }
+    }
+    const children = node.props?.children;
+    if (Array.isArray(children)) {
+      return {
+        ...node,
+        props: {
+          ...node.props,
+          children: children.map(renderNode),
+        },
+      };
+    } else if (children && typeof children === 'object') {
+      return {
+        ...node,
+        props: {
+          ...node.props,
+          children: renderNode(children),
+        },
+      };
+    }
+    return node;
+  };
+
   const executeRender = (el: React.ReactElement) => {
     hookIndex = 0;
     isDirty = false;
@@ -149,7 +181,8 @@ export function render(element: React.ReactElement): RenderResult {
     ReactSharedInternals.ReactCurrentDispatcher.current = dispatcher;
 
     try {
-      vdom = (el.type as any)(el.props);
+      const root = (el.type as any)(el.props);
+      vdom = renderNode(root);
     } finally {
       ReactSharedInternals.ReactCurrentDispatcher.current = prevDispatcher;
     }
@@ -179,15 +212,6 @@ export function render(element: React.ReactElement): RenderResult {
     if (predicate(node)) {
       return node;
     }
-    if (typeof node.type === 'function' && node.type.name === 'FlatList') {
-      try {
-        const rendered = node.type(node.props);
-        const found = findByPredicate(rendered, predicate);
-        if (found) return found;
-      } catch {
-        // Ignored
-      }
-    }
     const children = node.props?.children;
     if (Array.isArray(children)) {
       for (const child of children) {
@@ -204,7 +228,7 @@ export function render(element: React.ReactElement): RenderResult {
     if (text === null || text === undefined) return false;
     const str = String(text);
     if (typeof matcher === 'string') {
-      return str.includes(matcher);
+      return str.includes(matcher) || str.toLowerCase().includes(matcher.toLowerCase());
     }
     if (matcher instanceof RegExp) {
       return matcher.test(str);
@@ -214,6 +238,11 @@ export function render(element: React.ReactElement): RenderResult {
 
   const nodeMatchesText = (node: any, matcher: string | RegExp): boolean => {
     if (!node?.props) return false;
+    if (node.props?.value !== undefined && node.props?.value !== null) {
+      if (matchesText(node.props.value, matcher)) {
+        return true;
+      }
+    }
     const children = node.props?.children;
     if (typeof children === 'string' || typeof children === 'number') {
       return matchesText(children, matcher);
@@ -244,12 +273,14 @@ export function render(element: React.ReactElement): RenderResult {
       }
       return found;
     },
-    getByLabelText: (label: string) => {
+    getByLabelText: (label: string | RegExp) => {
       if (isDirty) {
         executeRender(currentElement);
         flushEffects();
       }
-      const found = findByPredicate(vdom, (node) => node?.props?.accessibilityLabel === label);
+      const found = findByPredicate(vdom, (node) =>
+        matchesText(node?.props?.accessibilityLabel, label)
+      );
       if (!found) {
         throw new Error(`Element with accessibilityLabel "${label}" not found`);
       }
@@ -289,6 +320,13 @@ export function render(element: React.ReactElement): RenderResult {
         throw new Error(`Element with text "${matcher}" not found`);
       }
       return found;
+    },
+    queryByText: (matcher: string | RegExp) => {
+      if (isDirty) {
+        executeRender(currentElement);
+        flushEffects();
+      }
+      return findByPredicate(vdom, (node) => nodeMatchesText(node, matcher));
     },
     findByText: async (
       matcher: string | RegExp,

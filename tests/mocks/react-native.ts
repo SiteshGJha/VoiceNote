@@ -54,6 +54,8 @@ export const Modal = 'Modal';
 export const Share = {
   share: () => Promise.resolve({ action: 'sharedAction' }),
 };
+export const TextInput = 'TextInput';
+export const ScrollView = 'ScrollView';
 
 export default {
   Platform,
@@ -70,5 +72,7 @@ export default {
   FlatList,
   Modal,
   Share,
+  TextInput,
+  ScrollView,
 };
 
