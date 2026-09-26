@@ -6,6 +6,7 @@ module.exports = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
     '^react-native$': '<rootDir>/tests/mocks/react-native.ts',
+    '^react-native-mmkv$': '<rootDir>/tests/mocks/react-native-mmkv.ts',
     '^@testing-library/react-native$': '<rootDir>/tests/mocks/testing-library-react-native.ts',
     '^@testing-library/react-hooks$': '<rootDir>/tests/mocks/testing-library-react-native.ts',
   },

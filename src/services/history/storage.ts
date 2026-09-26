@@ -1,3 +1,4 @@
+import { MMKV } from 'react-native-mmkv';
 import { HistoryRecordInput, TranscriptionRecord } from './types';
 import { getOrCreateStorageKey } from './keychain';
 import { logger } from '@/utils/logger';
@@ -5,6 +6,7 @@ import { logger } from '@/utils/logger';
 export const MAX_HISTORY_RECORDS = 50;
 
 class HistoryStorageService {
+  private storage: MMKV | null = null;
   private records: TranscriptionRecord[] = [];
   private isInitialized = false;
 
@@ -14,9 +16,15 @@ class HistoryStorageService {
     }
     // Obtain encryption key from Keychain
     const key = await getOrCreateStorageKey();
-    // In production with react-native-mmkv:
-    // this.storage = new MMKV({ id: 'voicenote-history', encryptionKey: key });
-    logger.info('HistoryStorage', `Storage initialized with key length: ${key.length}`);
+    this.storage = new MMKV({ id: 'voicenote-history', encryptionKey: key });
+    try {
+      const raw = this.storage.getString('records');
+      this.records = raw ? (JSON.parse(raw) as TranscriptionRecord[]) : [];
+    } catch (err) {
+      logger.error('HistoryStorage', 'Failed to parse records from MMKV', err);
+      this.records = [];
+    }
+    logger.info('HistoryStorage', `Storage initialized with key length: ${key.length}, loaded ${this.records.length} records`);
     this.isInitialized = true;
   }
 
@@ -42,6 +50,7 @@ class HistoryStorageService {
       logger.info('HistoryStorage', `Evicted ${evictedCount} oldest records to respect 50-item cap`);
     }
 
+    this.storage?.set('records', JSON.stringify(this.records));
     logger.info('HistoryStorage', `Saved record ${record.id}. Total items: ${this.records.length}`);
     return record;
   }
@@ -62,6 +71,7 @@ class HistoryStorageService {
     this.records = this.records.filter((r) => r.id !== id);
     const deleted = this.records.length < prevLength;
     if (deleted) {
+      this.storage?.set('records', JSON.stringify(this.records));
       logger.info('HistoryStorage', `Deleted record ${id}. Remaining: ${this.records.length}`);
     }
     return deleted;
@@ -71,6 +81,7 @@ class HistoryStorageService {
     await this.initialize();
     const count = this.records.length;
     this.records = [];
+    this.storage?.set('records', JSON.stringify(this.records));
     logger.info('HistoryStorage', `Cleared all ${count} history records`);
   }
 }
