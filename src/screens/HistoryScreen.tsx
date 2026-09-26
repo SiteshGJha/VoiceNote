@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -25,6 +25,7 @@ export const HistoryScreen: React.FC = () => {
   const themeMode = useSettingsStore((s) => s.themeMode);
   const theme = themeMode === 'dark' ? darkTheme : lightTheme;
 
+  const isMountedRef = useRef(true);
   const [isLoading, setIsLoading] = useState(true);
   const [records, setRecords] = useState<TranscriptionRecord[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<TranscriptionRecord | null>(null);
@@ -34,11 +35,15 @@ export const HistoryScreen: React.FC = () => {
     setIsLoading(true);
     try {
       const list = await historyStorage.listRecords();
-      setRecords(list);
+      if (isMountedRef.current) {
+        setRecords(list);
+      }
     } catch {
       // Ignored
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -59,7 +64,13 @@ export const HistoryScreen: React.FC = () => {
   };
 
   useEffect(() => {
+    let isMounted = true;
+    isMountedRef.current = true;
     loadHistory();
+    return () => {
+      isMounted = false;
+      isMountedRef.current = false;
+    };
   }, []);
 
   const handleDeleteItem = (id: string): void => {
@@ -170,20 +181,15 @@ export const HistoryScreen: React.FC = () => {
             color={theme.primary}
           />
         </View>
-      ) : records.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={[styles.emptyIcon, { color: theme.textMuted }]}>📝</Text>
-          <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>No Notes Yet</Text>
-          <Text style={[styles.emptySubtitle, { color: theme.textSecondary }]}>
-            No notes yet — tap the mic to record your first note.
-          </Text>
-        </View>
       ) : (
         <FlatList
           data={records}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[
+            styles.listContent,
+            records.length === 0 && styles.emptyListContent,
+          ]}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Text style={[styles.emptyIcon, { color: theme.textMuted }]}>📝</Text>
@@ -270,6 +276,10 @@ const styles = StyleSheet.create({
   listContent: {
     padding: 16,
     gap: 12,
+  },
+  emptyListContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
   },
   itemCard: {
     borderRadius: 12,

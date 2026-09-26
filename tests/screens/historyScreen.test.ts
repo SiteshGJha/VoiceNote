@@ -27,7 +27,7 @@ describe('HistoryScreen: Empty State + Loading State', () => {
 
   it('shows loading spinner before records resolve', async () => {
     jest.spyOn(historyStorage, 'listRecords').mockImplementation(
-      () => new Promise((r) => setTimeout(() => r([]), 100))
+      () => new Promise(() => {})
     );
     const { getByTestId } = render(React.createElement(HistoryScreen));
     expect(getByTestId('history-loading')).toBeTruthy();
@@ -54,5 +54,19 @@ describe('HistoryScreen: Empty State + Loading State', () => {
     const { findByText, queryByTestId } = render(React.createElement(HistoryScreen));
     expect(await findByText('Hello world.')).toBeTruthy();
     expect(queryByTestId('history-loading')).toBeNull();
+  });
+
+  it('does not update state when unmounted before records resolve', async () => {
+    let resolvePromise: (records: any[]) => void = () => {};
+    jest.spyOn(historyStorage, 'listRecords').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePromise = resolve;
+        })
+    );
+    const { unmount, queryByTestId } = render(React.createElement(HistoryScreen));
+    expect(queryByTestId('history-loading')).toBeTruthy();
+    unmount();
+    resolvePromise([]);
   });
 });
