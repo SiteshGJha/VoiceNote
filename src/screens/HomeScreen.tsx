@@ -21,7 +21,6 @@ import { Waveform } from '@/components/Waveform';
 import { ToneSelector } from '@/components/ToneSelector';
 import { LanguageSelector } from '@/components/LanguageSelector';
 import { PermissionGate } from '@/components/PermissionGate';
-import { BrandIcon } from '@/components/BrandIcon';
 import { executePipeline } from '@/pipeline/orchestrator';
 import { useSettingsStore } from '@/state/useSettingsStore';
 import { useAppStore } from '@/state/useAppStore';
@@ -41,7 +40,6 @@ export const HomeScreen: React.FC = () => {
   const defaultLang = useSettingsStore((s) => s.defaultLanguage);
   const vadSensitivity = useSettingsStore((s) => s.vadSensitivity);
   const hindiOutputFormat = useSettingsStore((s) => s.hindiOutputFormat);
-  const asrModelTier = useSettingsStore((s) => s.asrModelTier);
 
   const {
     stage,
@@ -211,7 +209,6 @@ export const HomeScreen: React.FC = () => {
           tone: activeTone,
           lang: activeLanguage,
           hindiOutput: hindiOutputFormat,
-          asrTier: asrModelTier,
         },
         (currentStage) => {
           if (currentStage === 'asr') {
@@ -261,10 +258,7 @@ export const HomeScreen: React.FC = () => {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]}>
       {/* Top action bar */}
       <View style={[styles.topBar, { borderBottomColor: theme.border }]}>
-        <View style={styles.brandRow}>
-          <BrandIcon size={32} />
-          <Text style={[styles.appTitle, { color: theme.textPrimary }]}>VoiceNote</Text>
-        </View>
+        <Text style={[styles.appTitle, { color: theme.textPrimary }]}>VoiceNote</Text>
         <View style={styles.topActions}>
           <TouchableOpacity
             style={[styles.iconButton, { backgroundColor: theme.surfaceSubtle }]}
@@ -384,11 +378,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     borderBottomWidth: 1,
-  },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
   },
   appTitle: {
     fontSize: 20,

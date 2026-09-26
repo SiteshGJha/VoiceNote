@@ -286,6 +286,8 @@ describe('HomeScreen Record Button Debounce', () => {
     effectCallbacks = [];
     mockRecordingState = 'idle';
     mockNativeAudio.isNativeAvailable = false;
+    const { Platform } = require('react-native');
+    Platform.OS = 'ios';
   });
 
   it('ignores a second record tap while recording is already active', async () => {
