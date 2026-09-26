@@ -15,6 +15,7 @@ export interface AsrOptions {
   hindiOutput?: HindiOutputFormat | undefined;
   prompt?: string | undefined;
   timeoutMs?: number | undefined;
+  asrTier?: AsrModelTier | undefined;
 }
 
 export type AsrResult =
@@ -62,6 +63,10 @@ export type PipelineResult =
       lang: DetectedLang;
       totalDurationMs: number;
       audioDurationMs: number;
+      asrDurationMs: number;
+      slmDurationMs: number;
+      /** True when the SLM rewrite failed/suspected hallucination and raw was used as the final text. */
+      usedFallback: boolean;
     }
   | {
       status: 'error';

@@ -223,9 +223,17 @@ export const HomeScreen: React.FC = () => {
       );
 
       const totalElapsed = Date.now() - pipelineStartTime;
-      setMetrics({
-        totalDurationMs: totalElapsed,
-      });
+      if (result.status === 'ok') {
+        setMetrics({
+          totalDurationMs: totalElapsed,
+          asrDurationMs: result.asrDurationMs,
+          slmDurationMs: result.slmDurationMs,
+        });
+      } else {
+        setMetrics({
+          totalDurationMs: totalElapsed,
+        });
+      }
 
       // Off-main-thread responsiveness: run UI transition after interactions complete
       InteractionManager.runAfterInteractions(() => {

@@ -10,11 +10,8 @@ export type PipelineStage =
   | 'completed'
   | 'error';
 
-export interface PipelineMetrics {
-  asrDurationMs?: number | undefined;
-  slmDurationMs?: number | undefined;
-  totalDurationMs?: number | undefined;
-}
+import { PipelineMetrics } from './types';
+export type { PipelineMetrics };
 
 interface AppStore {
   stage: PipelineStage;

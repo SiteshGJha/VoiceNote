@@ -22,14 +22,18 @@ export async function executePipeline(
   let rawTranscript = '';
   let detectedLanguage: DetectedLang = 'en';
   let asrDuration = 0;
+  let slmDuration = 0;
 
   try {
     // 1. Stage: Speech-to-Text (ASR)
     onStageChange?.('asr');
+    const asrStart = Date.now();
     const asrResult = await transcribe(audio.uri, {
       lang: options.lang,
       hindiOutput: options.hindiOutput,
+      asrTier: options.asrTier,
     });
+    asrDuration = Date.now() - asrStart;
 
     // 2. Prime Directive: Immediately delete temporary audio file post-ASR, regardless of result!
     await audioRecorder.cleanupTempFile(audio.uri);
@@ -46,21 +50,24 @@ export async function executePipeline(
 
     rawTranscript = asrResult.text;
     detectedLanguage = asrResult.detectedLang;
-    asrDuration = asrResult.durationMs;
 
     // 3. Stage: Tone Rewriting (SLM)
     let finalRewrittenText = rawTranscript;
+    let usedFallback = false;
     if (!options.skipRewriting) {
       onStageChange?.('slm');
+      const slmStart = Date.now();
       const slmResult = await rewrite(rawTranscript, options.tone, {
         lang: detectedLanguage,
       });
+      slmDuration = Date.now() - slmStart;
 
       if (slmResult.status === 'ok') {
         finalRewrittenText = slmResult.final;
       } else {
         // Fall back gracefully to raw transcript on rewrite failure or suspected hallucination
         finalRewrittenText = slmResult.fallbackText;
+        usedFallback = true;
         logger.warn('Pipeline', `SLM fallback activated: ${slmResult.message}`);
       }
     }
@@ -89,6 +96,9 @@ export async function executePipeline(
       lang: detectedLanguage,
       totalDurationMs,
       audioDurationMs: audio.durationMs,
+      asrDurationMs: asrDuration,
+      slmDurationMs: slmDuration,
+      usedFallback,
     };
   } catch (err) {
     // Always guarantee audio cleanup on unexpected pipeline error

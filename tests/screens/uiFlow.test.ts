@@ -60,6 +60,9 @@ describe('Phase 6: UI Flows & Production Hardening', () => {
         lang: 'en',
         totalDurationMs: 1200,
         audioDurationMs: 2500,
+        asrDurationMs: 650,
+        slmDurationMs: 450,
+        usedFallback: false,
       });
 
       expect(useAppStore.getState().stage).toBe('completed');

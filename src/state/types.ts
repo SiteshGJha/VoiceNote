@@ -3,6 +3,12 @@ import { VadSensitivity } from '@/audio/vadPresets';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
+export interface PipelineMetrics {
+  asrDurationMs?: number | undefined;
+  slmDurationMs?: number | undefined;
+  totalDurationMs?: number | undefined;
+}
+
 export interface UserSettings {
   defaultTone: Tone;
   defaultLanguage: Lang;
