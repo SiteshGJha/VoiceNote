@@ -10,6 +10,11 @@ export interface RenderResult {
   rerender: (newElement: React.ReactElement) => void;
   getByRole: (role: string) => any;
   getByLabelText: (label: string) => any;
+  getByTestId: (testId: string) => any;
+  queryByTestId: (testId: string) => any;
+  getByText: (matcher: string | RegExp) => any;
+  findByText: (matcher: string | RegExp, options?: { timeout?: number; interval?: number }) => Promise<any>;
+  findByTestId: (testId: string, options?: { timeout?: number; interval?: number }) => Promise<any>;
   UNSAFE_getByType: (type: any) => any;
   unmount: () => void;
 }
@@ -174,6 +179,15 @@ export function render(element: React.ReactElement): RenderResult {
     if (predicate(node)) {
       return node;
     }
+    if (typeof node.type === 'function' && node.type.name === 'FlatList') {
+      try {
+        const rendered = node.type(node.props);
+        const found = findByPredicate(rendered, predicate);
+        if (found) return found;
+      } catch {
+        // Ignored
+      }
+    }
     const children = node.props?.children;
     if (Array.isArray(children)) {
       for (const child of children) {
@@ -186,6 +200,33 @@ export function render(element: React.ReactElement): RenderResult {
     return null;
   };
 
+  const matchesText = (text: any, matcher: string | RegExp): boolean => {
+    if (text === null || text === undefined) return false;
+    const str = String(text);
+    if (typeof matcher === 'string') {
+      return str.includes(matcher);
+    }
+    if (matcher instanceof RegExp) {
+      return matcher.test(str);
+    }
+    return false;
+  };
+
+  const nodeMatchesText = (node: any, matcher: string | RegExp): boolean => {
+    if (!node?.props) return false;
+    const children = node.props?.children;
+    if (typeof children === 'string' || typeof children === 'number') {
+      return matchesText(children, matcher);
+    }
+    if (Array.isArray(children)) {
+      const textParts = children.filter((c) => typeof c === 'string' || typeof c === 'number');
+      if (textParts.length > 0) {
+        return matchesText(textParts.join(''), matcher);
+      }
+    }
+    return false;
+  };
+
   return {
     rerender: (newElement: React.ReactElement) => {
       currentElement = newElement;
@@ -193,6 +234,10 @@ export function render(element: React.ReactElement): RenderResult {
       flushEffects();
     },
     getByRole: (role: string) => {
+      if (isDirty) {
+        executeRender(currentElement);
+        flushEffects();
+      }
       const found = findByPredicate(vdom, (node) => node?.props?.accessibilityRole === role);
       if (!found) {
         throw new Error(`Element with accessibilityRole "${role}" not found`);
@@ -200,11 +245,97 @@ export function render(element: React.ReactElement): RenderResult {
       return found;
     },
     getByLabelText: (label: string) => {
+      if (isDirty) {
+        executeRender(currentElement);
+        flushEffects();
+      }
       const found = findByPredicate(vdom, (node) => node?.props?.accessibilityLabel === label);
       if (!found) {
         throw new Error(`Element with accessibilityLabel "${label}" not found`);
       }
       return found;
+    },
+    getByTestId: (testId: string) => {
+      if (isDirty) {
+        executeRender(currentElement);
+        flushEffects();
+      }
+      const found = findByPredicate(
+        vdom,
+        (node) => node?.props?.testID === testId || node?.props?.testId === testId
+      );
+      if (!found) {
+        throw new Error(`Element with testID "${testId}" not found`);
+      }
+      return found;
+    },
+    queryByTestId: (testId: string) => {
+      if (isDirty) {
+        executeRender(currentElement);
+        flushEffects();
+      }
+      return findByPredicate(
+        vdom,
+        (node) => node?.props?.testID === testId || node?.props?.testId === testId
+      );
+    },
+    getByText: (matcher: string | RegExp) => {
+      if (isDirty) {
+        executeRender(currentElement);
+        flushEffects();
+      }
+      const found = findByPredicate(vdom, (node) => nodeMatchesText(node, matcher));
+      if (!found) {
+        throw new Error(`Element with text "${matcher}" not found`);
+      }
+      return found;
+    },
+    findByText: async (
+      matcher: string | RegExp,
+      options?: { timeout?: number; interval?: number }
+    ) => {
+      const timeout = options?.timeout ?? 1000;
+      const interval = options?.interval ?? 10;
+      const start = Date.now();
+      while (true) {
+        if (isDirty) {
+          executeRender(currentElement);
+          flushEffects();
+        }
+        const found = findByPredicate(vdom, (node) => nodeMatchesText(node, matcher));
+        if (found) {
+          return found;
+        }
+        if (Date.now() - start >= timeout) {
+          throw new Error(`Timed out waiting for element with text "${matcher}"`);
+        }
+        await new Promise((r) => setTimeout(r, interval));
+      }
+    },
+    findByTestId: async (
+      testId: string,
+      options?: { timeout?: number; interval?: number }
+    ) => {
+      const timeout = options?.timeout ?? 1000;
+      const interval = options?.interval ?? 10;
+      const start = Date.now();
+      while (true) {
+        if (isDirty) {
+          executeRender(currentElement);
+          flushEffects();
+        }
+        const found = findByPredicate(
+          vdom,
+          (node) => node?.props?.testID === testId || node?.props?.testId === testId
+        );
+        if (found) {
+          return found;
+        }
+        if (Date.now() - start >= timeout) {
+          throw new Error(`Timed out waiting for element with testID "${testId}"`);
+        }
+        await new Promise((r) => setTimeout(r, interval));
+      }
     },
     UNSAFE_getByType: (type: any) => {
       const found = findByPredicate(

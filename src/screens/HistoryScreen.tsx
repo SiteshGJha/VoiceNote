@@ -9,6 +9,7 @@ import {
   Alert,
   Modal,
   Share,
+  ActivityIndicator,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation } from '@react-navigation/native';
@@ -24,13 +25,21 @@ export const HistoryScreen: React.FC = () => {
   const themeMode = useSettingsStore((s) => s.themeMode);
   const theme = themeMode === 'dark' ? darkTheme : lightTheme;
 
+  const [isLoading, setIsLoading] = useState(true);
   const [records, setRecords] = useState<TranscriptionRecord[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<TranscriptionRecord | null>(null);
   const [copiedToast, setCopiedToast] = useState(false);
 
   const loadHistory = async (): Promise<void> => {
-    const list = await historyStorage.listRecords();
-    setRecords(list);
+    setIsLoading(true);
+    try {
+      const list = await historyStorage.listRecords();
+      setRecords(list);
+    } catch {
+      // Ignored
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleCopy = async (text: string): Promise<void> => {
@@ -153,12 +162,20 @@ export const HistoryScreen: React.FC = () => {
         }}
       />
 
-      {records.length === 0 ? (
+      {isLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator
+            testID="history-loading"
+            size="large"
+            color={theme.primary}
+          />
+        </View>
+      ) : records.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={[styles.emptyIcon, { color: theme.textMuted }]}>📝</Text>
           <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>No Notes Yet</Text>
           <Text style={[styles.emptySubtitle, { color: theme.textSecondary }]}>
-            Recorded notes are saved encrypted on your device and capped at 50 records.
+            No notes yet — tap the mic to record your first note.
           </Text>
         </View>
       ) : (
@@ -167,6 +184,15 @@ export const HistoryScreen: React.FC = () => {
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           contentContainerStyle={styles.listContent}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={[styles.emptyIcon, { color: theme.textMuted }]}>📝</Text>
+              <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>No Notes Yet</Text>
+              <Text style={[styles.emptySubtitle, { color: theme.textSecondary }]}>
+                No notes yet — tap the mic to record your first note.
+              </Text>
+            </View>
+          }
         />
       )}
 
@@ -277,6 +303,11 @@ const styles = StyleSheet.create({
   itemSnippet: {
     fontSize: 14,
     lineHeight: 20,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyContainer: {
     flex: 1,
