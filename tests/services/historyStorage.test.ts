@@ -1,4 +1,5 @@
 import { historyStorage, MAX_HISTORY_RECORDS } from '@/services/history';
+import * as mmkvModule from 'react-native-mmkv';
 
 describe('History Storage Persistence & FIFO Eviction', () => {
   beforeEach(async () => {
@@ -158,5 +159,61 @@ describe('History Storage Persistence & FIFO Eviction', () => {
 
     const records = await historyStorage.listRecords();
     expect(records).toEqual([]);
+  });
+
+  it('falls back gracefully to in-memory storage if MMKV instantiation throws', async () => {
+    const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Reset service state to force re-initialization
+    (historyStorage as any).storage = null;
+    (historyStorage as any).records = [];
+    (historyStorage as any).isInitialized = false;
+
+    const mmkvSpy = jest.spyOn(mmkvModule, 'MMKV').mockImplementation(() => {
+      throw new Error('Native MMKV initialization failed');
+    });
+
+    try {
+      const record = await historyStorage.addRecord({
+        rawText: 'Fallback note',
+        finalText: 'Fallback note.',
+        tone: 'casual',
+        lang: 'en',
+        audioDurationMs: 1500,
+        processingDurationMs: 250,
+      });
+
+      expect(record.rawText).toBe('Fallback note');
+      expect((historyStorage as any).storage).toBeNull();
+
+      const records = await historyStorage.listRecords();
+      expect(records).toHaveLength(1);
+      expect(records[0]?.rawText).toBe('Fallback note');
+
+      const deleted = await historyStorage.deleteRecord(record.id);
+      expect(deleted).toBe(true);
+
+      const afterDelete = await historyStorage.listRecords();
+      expect(afterDelete).toHaveLength(0);
+
+      await historyStorage.addRecord({
+        rawText: 'Note to clear',
+        finalText: 'Note to clear.',
+        tone: 'casual',
+        lang: 'en',
+        audioDurationMs: 1000,
+        processingDurationMs: 100,
+      });
+      await historyStorage.clearAll();
+      const afterClear = await historyStorage.listRecords();
+      expect(afterClear).toHaveLength(0);
+    } finally {
+      mmkvSpy.mockRestore();
+      consoleWarnSpy.mockRestore();
+      // Reset service state so subsequent tests can re-initialize properly
+      (historyStorage as any).storage = null;
+      (historyStorage as any).records = [];
+      (historyStorage as any).isInitialized = false;
+    }
   });
 });
