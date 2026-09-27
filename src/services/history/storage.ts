@@ -16,15 +16,21 @@ class HistoryStorageService {
     }
     // Obtain encryption key from Keychain
     const key = await getOrCreateStorageKey();
-    this.storage = new MMKV({ id: 'voicenote-history', encryptionKey: key });
     try {
-      const raw = this.storage.getString('records');
-      this.records = raw ? (JSON.parse(raw) as TranscriptionRecord[]) : [];
+      this.storage = new MMKV({ id: 'voicenote-history', encryptionKey: key });
+      try {
+        const raw = this.storage.getString('records');
+        this.records = raw ? (JSON.parse(raw) as TranscriptionRecord[]) : [];
+      } catch (err) {
+        logger.error('HistoryStorage', 'Failed to parse records from MMKV', err);
+        this.records = [];
+      }
+      logger.info('HistoryStorage', `Storage initialized with key length: ${key.length}, loaded ${this.records.length} records`);
     } catch (err) {
-      logger.error('HistoryStorage', 'Failed to parse records from MMKV', err);
+      logger.warn('HistoryStorage', 'Native MMKV initialization failed, falling back to in-memory storage', err);
+      this.storage = null;
       this.records = [];
     }
-    logger.info('HistoryStorage', `Storage initialized with key length: ${key.length}, loaded ${this.records.length} records`);
     this.isInitialized = true;
   }
 
