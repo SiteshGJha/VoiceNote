@@ -163,7 +163,12 @@ export async function transcribe(uri: string, opts: AsrOptions): Promise<AsrResu
         if (partText) {
           transcriptParts.push(partText);
           langCounts[inferenceResult.detectedLang] += 1;
+          logger.info('ASR', `Segment [${segment.startMs}ms - ${segment.endMs}ms] transcribed: "${partText.slice(0, 60)}..."`);
+        } else {
+          logger.warn('ASR', `Segment [${segment.startMs}ms - ${segment.endMs}ms] returned empty transcription`);
         }
+      } catch (segErr) {
+        logger.warn('ASR', `Segment [${segment.startMs}ms - ${segment.endMs}ms] inference failed`, segErr);
       } finally {
         // Prime directive: delete every temp segment file immediately after ASR.
         cleanup?.();
