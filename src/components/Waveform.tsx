@@ -19,6 +19,7 @@ export const Waveform: React.FC<WaveformProps> = ({
 
   const baselineBars = useMemo(() => new Array(barCount).fill(0.1), [barCount]);
   const barsRef = useRef<number[]>(baselineBars);
+  const lastUpdateMsRef = useRef<number>(0);
   const [bars, setBars] = useState<number[]>(baselineBars);
 
   useEffect(() => {
@@ -27,6 +28,13 @@ export const Waveform: React.FC<WaveformProps> = ({
       setBars(baselineBars);
       return;
     }
+
+    const now = Date.now();
+    // 60ms throttle to prevent UI thread thrashing on long recordings
+    if (now - lastUpdateMsRef.current < 60) {
+      return;
+    }
+    lastUpdateMsRef.current = now;
 
     const prevHeight = barsRef.current[barsRef.current.length - 1] ?? 0.1;
     // Deterministic low-pass filter: smooth amplitude transitions without Math.random() jitter

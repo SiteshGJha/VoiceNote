@@ -21,6 +21,8 @@ import { Waveform } from '@/components/Waveform';
 import { ToneSelector } from '@/components/ToneSelector';
 import { LanguageSelector } from '@/components/LanguageSelector';
 import { PermissionGate } from '@/components/PermissionGate';
+import { AnimatedRecordButton } from '@/components/AnimatedRecordButton';
+import { useHardwareTrigger } from '@/native/hardwareTrigger';
 import { executePipeline } from '@/pipeline/orchestrator';
 import { useSettingsStore } from '@/state/useSettingsStore';
 import { useAppStore } from '@/state/useAppStore';
@@ -261,6 +263,15 @@ export const HomeScreen: React.FC = () => {
   const isRecording = recordingState === 'recording';
   const isProcessing = stage === 'transcribing' || stage === 'rewriting';
 
+  // Double-press hardware trigger toggle
+  useHardwareTrigger(() => {
+    if (isRecording) {
+      handleStopRecording();
+    } else if (!isProcessing) {
+      handleStartRecording();
+    }
+  });
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]}>
       {/* Top action bar */}
@@ -340,22 +351,11 @@ export const HomeScreen: React.FC = () => {
 
         {/* Record trigger button */}
         <View style={styles.bottomSection}>
-          <TouchableOpacity
-            style={[
-              styles.recordButton,
-              {
-                backgroundColor: isRecording ? theme.recordActive : theme.primary,
-                shadowColor: isRecording ? theme.recordActive : theme.primary,
-              },
-            ]}
+          <AnimatedRecordButton
+            isRecording={isRecording}
+            isProcessing={isProcessing}
             onPress={isRecording ? handleStopRecording : handleStartRecording}
-            disabled={isProcessing}
-            accessible={true}
-            accessibilityRole="button"
-            accessibilityLabel={isRecording ? 'Stop recording' : 'Start recording'}
-          >
-            <Text style={styles.recordButtonIcon}>{isRecording ? '⏹' : '🎙'}</Text>
-          </TouchableOpacity>
+          />
 
           {isRecording && (
             <TouchableOpacity

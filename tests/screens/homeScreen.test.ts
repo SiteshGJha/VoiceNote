@@ -111,6 +111,16 @@ jest.mock('@/components/ToneSelector', () => ({
 jest.mock('@/components/LanguageSelector', () => ({
   LanguageSelector: () => null,
 }));
+jest.mock('@/components/AnimatedRecordButton', () => ({
+  AnimatedRecordButton: (props: any) =>
+    React.createElement('TouchableOpacity', {
+      accessibilityRole: 'button',
+      accessibilityLabel: props.isRecording ? 'Stop recording' : 'Start recording',
+      onPress: props.onPress,
+      disabled: props.disabled || props.isProcessing,
+      children: props.isRecording ? '⏹' : '🎙',
+    }),
+}));
 
 // Mock @testing-library/react-native
 let hookIndex = 0;
@@ -185,9 +195,41 @@ jest.mock('@testing-library/react-native', () => {
       const prevDispatcher = ReactSharedInternals.ReactCurrentDispatcher.current;
       ReactSharedInternals.ReactCurrentDispatcher.current = mockDispatcher;
 
+      const renderNode = (node: any): any => {
+        if (!node) return null;
+        if (typeof node.type === 'function') {
+          try {
+            const rendered = node.type(node.props);
+            return renderNode(rendered);
+          } catch {
+            return node;
+          }
+        }
+        const children = node.props?.children;
+        if (Array.isArray(children)) {
+          return {
+            ...node,
+            props: {
+              ...node.props,
+              children: children.map(renderNode),
+            },
+          };
+        } else if (children && typeof children === 'object') {
+          return {
+            ...node,
+            props: {
+              ...node.props,
+              children: renderNode(children),
+            },
+          };
+        }
+        return node;
+      };
+
       let vdom: any;
       try {
-        vdom = element.type(element.props);
+        const root = element.type(element.props);
+        vdom = renderNode(root);
       } finally {
         ReactSharedInternals.ReactCurrentDispatcher.current = prevDispatcher;
       }
