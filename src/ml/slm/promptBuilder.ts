@@ -3,7 +3,7 @@ import { Tone, DetectedLang } from '../types';
 export const SLM_PARAMS = {
   temperature: 0.3, // low — we want faithful rewriting, not creativity
   topP: 0.9,
-  maxTokens: 512,
+  maxTokens: 1024,
   stop: ['\n\n', 'Input:', 'Output:'],
   repeatPenalty: 1.1,
 } as const;

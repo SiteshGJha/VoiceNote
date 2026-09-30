@@ -34,8 +34,16 @@ describe('SLM Meaning Preservation Guard', () => {
     const raw = 'This is a standard thirty character long sentence.';
     const collapsed = 'Hi.';
     const result = validatePreservation(raw, collapsed);
-
     expect(result.isValid).toBe(false);
     expect(result.reason).toContain('Length ratio');
+  });
+
+  it('validates legitimate tone rewrites of long text without false hallucination rejection', () => {
+    const raw =
+      'Um so we need to schedule the quarterly planning meeting on October 15th at 3pm with Sarah and John to review the Q3 budget.';
+    const final =
+      'We need to schedule the quarterly planning meeting on October 15 at 3:00 PM with Sarah and John to review the Q3 budget.';
+    const result = validatePreservation(raw, final);
+    expect(result.isValid).toBe(true);
   });
 });
