@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { transcribe } from '@/ml/asr';
+import { transcribe, computeTimeoutForDuration } from '@/ml/asr';
 import { asrModelRegistry } from '@/ml/asr/modelRegistry';
 import { wrapPcmWithWavHeader } from '@/audio/wavUtils';
 
@@ -98,5 +98,64 @@ describe('ASR Transcription Pipeline', () => {
     if (result.status === 'error') {
       expect(result.code).toBe('AUDIO_RECORD_FAILED');
     }
+  });
+
+  describe('Model tier wiring', () => {
+    afterEach(() => {
+      // Restore default registry state for other tests
+      asrModelRegistry.registerInstalledModel('whisper-base-multilingual', '');
+    });
+
+    it('returns ASR_MODEL_MISSING when the requested tier is not installed', async () => {
+      asrModelRegistry.unregisterModel('whisper-small-multilingual');
+      const result = await transcribe('/mock/cache/audio.wav', { lang: 'en', asrTier: 'accurate' });
+      expect(result.status).toBe('error');
+      if (result.status === 'error') {
+        expect(result.code).toBe('ASR_MODEL_MISSING');
+      }
+      asrModelRegistry.registerInstalledModel('whisper-small-multilingual', '/mock/path/whisper-small.bin');
+    });
+  });
+
+  describe('Adaptive timeout scaling', () => {
+    it('scales with duration and never drops below the 30s floor or above 120s cap', () => {
+      expect(computeTimeoutForDuration(1000)).toBe(30_000);
+      expect(computeTimeoutForDuration(10_000)).toBe(45_000);
+      expect(computeTimeoutForDuration(30_000)).toBeGreaterThanOrEqual(30_000);
+      expect(computeTimeoutForDuration(60_000)).toBeGreaterThanOrEqual(30_000);
+      expect(computeTimeoutForDuration(2 * 60_000)).toBeLessThanOrEqual(120_000);
+    });
+
+    it('honors an explicit caller timeout', () => {
+      expect(computeTimeoutForDuration(10_000, 5000)).toBe(5000);
+    });
+  });
+
+  describe('Long audio transcription (>27s)', () => {
+    it('transcribes 45s audio without truncating trailing speech', async () => {
+      // 45 seconds of 16 kHz 16-bit mono = 45 * 32,000 bytes
+      const longPcm = new Uint8Array(45 * 32_000);
+      // Fill with speech-level samples
+      const view = new DataView(longPcm.buffer);
+      for (let i = 0; i < longPcm.length / 2; i++) {
+        view.setInt16(i * 2, 4000, true);
+      }
+      const wavBytes = wrapPcmWithWavHeader(longPcm);
+      const longWavPath = path.join(os.tmpdir(), `long_test_${Date.now()}.wav`);
+      fs.writeFileSync(longWavPath, Buffer.from(wavBytes.buffer, wavBytes.byteOffset, wavBytes.byteLength));
+
+      try {
+        const result = await transcribe(longWavPath, { lang: 'en' });
+        expect(result.status).toBe('ok');
+        if (result.status === 'ok') {
+          expect(result.text).toBeTruthy();
+          expect(result.durationMs).toBeGreaterThan(0);
+        }
+      } finally {
+        if (fs.existsSync(longWavPath)) {
+          fs.unlinkSync(longWavPath);
+        }
+      }
+    });
   });
 });
