@@ -7,6 +7,7 @@ import {
   View,
 } from 'react-native';
 import { useSystemTheme } from '@/utils/theme';
+import { haptics } from '@/utils/haptics';
 
 interface AnimatedRecordButtonProps {
   isRecording: boolean;
@@ -129,6 +130,12 @@ export const AnimatedRecordButton: React.FC<AnimatedRecordButtonProps> = ({
           },
         ]}
         onPress={onPress}
+        onPressIn={() => {
+          // Immediately trigger haptic feedback on touch down
+          if (!disabled && !isProcessing && !isRecording) {
+            haptics.trigger('impactHeavy');
+          }
+        }}
         disabled={disabled || isProcessing}
         accessible={true}
         accessibilityRole="button"

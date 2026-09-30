@@ -126,8 +126,8 @@ export const HomeScreen: React.FC = () => {
         logger.info('HomeScreen', 'VAD detected speech end, entering silence window');
       },
       onAutoStop: () => {
-        logger.info('HomeScreen', 'VAD auto-stop triggered');
-        handleStopRecordingRef.current?.();
+        // Manual-stop-only for dictation: log event, but do not kill recording while user is thinking
+        logger.info('HomeScreen', 'VAD silence threshold reached (manual stop only mode active)');
       },
       onNoSpeech: () => {
         logger.info('HomeScreen', 'VAD detected no speech');

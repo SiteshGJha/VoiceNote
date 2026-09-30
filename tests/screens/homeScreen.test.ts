@@ -380,4 +380,14 @@ describe('HomeScreen Record Button Debounce', () => {
       PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
     );
   });
+
+  it('keeps recording active during natural pauses (does not auto-stop on silence)', async () => {
+    const { getByLabelText } = render(React.createElement(HomeScreen));
+    const btn = getByLabelText('Start recording');
+    fireEvent.press(btn);
+
+    await waitFor(() => expect(mockStart).toHaveBeenCalled());
+    // Auto-stop must not be called during recording
+    expect(mockStop).not.toHaveBeenCalled();
+  });
 });
