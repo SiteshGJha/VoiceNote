@@ -37,21 +37,33 @@ export function useHardwareTrigger(onTrigger: () => void): void {
       return;
     }
 
+    if (!NativeModules.VoiceNoteHardwareTrigger) {
+      logger.info('HardwareTrigger', 'Native hardware trigger module not available on this platform/target');
+      return;
+    }
+
     const detector = new DoublePressDetector(400);
     hardwareTrigger.setButton(triggerButton);
 
-    const emitter = new NativeEventEmitter(NativeModules.VoiceNoteHardwareTrigger);
-    const subscription = emitter.addListener('VoiceNoteHardwareTrigger', (event: { button?: string }) => {
-      logger.info('HardwareTrigger', `Received hardware press event: ${event?.button}`);
-      if (detector.press()) {
-        logger.info('HardwareTrigger', 'Double-press confirmed, firing trigger callback');
-        onTrigger();
-      }
-    });
+    try {
+      const emitter = new NativeEventEmitter(NativeModules.VoiceNoteHardwareTrigger);
+      const subscription = emitter.addListener('VoiceNoteHardwareTrigger', (event: { button?: string }) => {
+        logger.info('HardwareTrigger', `Received hardware press event: ${event?.button}`);
+        if (detector.press()) {
+          logger.info('HardwareTrigger', 'Double-press confirmed, firing trigger callback');
+          onTrigger();
+        }
+      });
 
-    return () => {
-      subscription.remove?.();
-      hardwareTrigger.setButton('none');
-    };
+      return () => {
+        subscription.remove?.();
+        hardwareTrigger.setButton('none');
+      };
+    } catch (err) {
+      logger.warn('HardwareTrigger', 'Failed to initialize NativeEventEmitter for hardware trigger', err);
+      return () => {
+        hardwareTrigger.setButton('none');
+      };
+    }
   }, [triggerButton, onTrigger]);
 }

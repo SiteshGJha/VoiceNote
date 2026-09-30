@@ -8,6 +8,11 @@ export const NativeModules: Record<string, any> = {
 };
 
 export class NativeEventEmitter {
+  constructor(nativeModule?: any) {
+    if (nativeModule == null) {
+      throw new Error('Invariant Violation: `new NativeEventEmitter()` requires a non-null argument.');
+    }
+  }
   addListener() {
     return { remove: () => {} };
   }
