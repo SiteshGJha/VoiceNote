@@ -72,4 +72,53 @@ describe('AudioRecorderService', () => {
 
     expect(audioRecorder.getState()).toBe('idle');
   });
+
+  it('prepends pre-roll audio frames captured prior to explicit start', async () => {
+    // While idle, push frames (simulate background mic buffer / early speech)
+    const preRollSpeech = createSpeechFrame(4000);
+    for (let i = 0; i < 15; i++) {
+      audioRecorder.pushFrame(preRollSpeech);
+    }
+
+    await audioRecorder.start();
+
+    // Push active recording frames
+    for (let i = 0; i < 5; i++) {
+      audioRecorder.pushFrame(preRollSpeech);
+    }
+
+    const result = await audioRecorder.stop();
+    expect(result).not.toBeNull();
+    if (!result) return;
+
+    // 5 active frames = 4800 bytes. With pre-roll (up to ~400ms = ~13 frames = 12480 bytes),
+    // total raw byte length before WAV header (44 bytes) must be >= 10 frames (9600 bytes)
+    expect(result.byteLength).toBeGreaterThanOrEqual(9600 + 44);
+    expect(result.hasSpeech).toBe(true);
+
+    if (result.uri && fs.existsSync(result.uri)) {
+      await audioRecorder.cleanupTempFile(result.uri);
+    }
+  });
+
+  it('applies tail hangover delay before finalizing stop', async () => {
+    await audioRecorder.start();
+    const speech = createSpeechFrame(5000);
+    audioRecorder.pushFrame(speech);
+
+    const stopPromise = audioRecorder.stop();
+    // During the hangover window, additional speech frame arrives
+    audioRecorder.pushFrame(speech);
+
+    const result = await stopPromise;
+    expect(result).not.toBeNull();
+    if (!result) return;
+
+    // Both the initial frame and the frame during hangover window must be included
+    expect(result.byteLength).toBeGreaterThanOrEqual(2 * 960 + 44);
+
+    if (result.uri && fs.existsSync(result.uri)) {
+      await audioRecorder.cleanupTempFile(result.uri);
+    }
+  });
 });
