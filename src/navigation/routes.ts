@@ -8,4 +8,5 @@ export type RootStackParamList = {
   Settings: undefined;
   Privacy: undefined;
   Reports: undefined;
+  Onboarding: undefined;
 };

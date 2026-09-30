@@ -172,6 +172,18 @@ export const SettingsScreen: React.FC = () => {
           settings.setThemeMode
         )}
 
+        {/* Hardware Double-Press Trigger */}
+        {renderOptionRow<'volume' | 'headphone' | 'none'>(
+          'Hardware Double-Press Trigger',
+          settings.hardwareTriggerButton,
+          [
+            { label: '🔊 Volume', value: 'volume' },
+            { label: '🎧 Headset', value: 'headphone' },
+            { label: 'Off', value: 'none' },
+          ],
+          settings.setHardwareTriggerButton
+        )}
+
         {/* Haptics Switch */}
         <View
           style={[styles.switchRow, { backgroundColor: theme.surface, borderColor: theme.border }]}

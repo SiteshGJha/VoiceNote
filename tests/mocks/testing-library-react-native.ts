@@ -21,6 +21,7 @@ export interface RenderResult {
 }
 
 const activeRenderers = new Set<() => void>();
+export const parentMap = new WeakMap<object, any>();
 
 export function render(element: React.ReactElement): RenderResult {
   let hookIndex = 0;
@@ -51,6 +52,7 @@ export function render(element: React.ReactElement): RenderResult {
         if (!Object.is(stateValues[idx], nextValue)) {
           stateValues[idx] = nextValue;
           isDirty = true;
+          flushIfDirty();
         }
       };
       return [stateValues[idx], setState];
@@ -156,19 +158,30 @@ export function render(element: React.ReactElement): RenderResult {
     }
     const children = node.props?.children;
     if (Array.isArray(children)) {
+      const mappedChildren = children.map((c: any) => {
+        const rendered = renderNode(c);
+        if (rendered && typeof rendered === 'object') {
+          parentMap.set(rendered, node);
+        }
+        return rendered;
+      });
       return {
         ...node,
         props: {
           ...node.props,
-          children: children.map(renderNode),
+          children: mappedChildren,
         },
       };
     } else if (children && typeof children === 'object') {
+      const renderedChild = renderNode(children);
+      if (renderedChild && typeof renderedChild === 'object') {
+        parentMap.set(renderedChild, node);
+      }
       return {
         ...node,
         props: {
           ...node.props,
-          children: renderNode(children),
+          children: renderedChild,
         },
       };
     }
@@ -474,8 +487,14 @@ export function renderHook<T>(hook: () => T): RenderHookResult<T> {
 
 export const fireEvent = {
   press: (node: any) => {
-    if (node?.props?.onPress) {
-      return node.props.onPress();
+    let curr = node;
+    while (curr) {
+      if (curr.props?.onPress) {
+        const res = curr.props.onPress();
+        activeRenderers.forEach((flush) => flush());
+        return res;
+      }
+      curr = parentMap.get(curr);
     }
   },
 };
