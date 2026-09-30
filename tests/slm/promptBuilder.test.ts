@@ -8,6 +8,8 @@ describe('SLM Prompt Builder', () => {
     expect(prompt).toContain('You rewrite spoken text into clear, professional writing.');
     expect(prompt).toContain('Remove filler words (um, uh, like, you know, matlab, arre).');
     expect(prompt).toContain('No contractions.');
+    expect(prompt).toContain('Deduplicate stuttered repeated words (e.g., "system system" -> "system").');
+    expect(prompt).toContain('Fix obvious speech recognition phonetic errors based on technical context.');
     expect(prompt).toContain('Preserve every fact, name, number, and date exactly.');
     expect(prompt).toContain(`Input: ${raw}`);
     expect(prompt).toContain('Output:');

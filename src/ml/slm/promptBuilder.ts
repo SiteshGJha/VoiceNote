@@ -17,6 +17,8 @@ const CANONICAL_TEMPLATES = {
     rules: [
       'Remove filler words (um, uh, like, you know, matlab, arre).',
       'Use complete sentences. No contractions.',
+      'Deduplicate stuttered repeated words (e.g., "system system" -> "system").',
+      'Fix obvious speech recognition phonetic errors based on technical context.',
       'Preserve every fact, name, number, and date exactly.',
       'Do not add information that is not in the input.',
       'Output only the rewritten text. No preamble, no quotes.',
@@ -26,6 +28,8 @@ const CANONICAL_TEMPLATES = {
     description: 'You rewrite spoken text into natural, casual writing.',
     rules: [
       'Keep contractions and everyday phrasing.',
+      'Deduplicate stuttered repeated words (e.g., "system system" -> "system").',
+      'Fix obvious speech recognition phonetic errors based on technical context.',
       'Light cleanup only — do not formalize.',
       'Preserve every fact, name, number, and date exactly.',
       'Output only the rewritten text. No preamble, no quotes.',
