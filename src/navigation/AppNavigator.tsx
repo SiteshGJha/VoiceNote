@@ -8,6 +8,7 @@ import { HistoryScreen } from '@/screens/HistoryScreen';
 import { ModelsScreen } from '@/screens/ModelsScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 import { PrivacyScreen } from '@/screens/PrivacyScreen';
+import { ReportsScreen } from '@/screens/ReportsScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -27,6 +28,7 @@ export const AppNavigator: React.FC = () => {
         <Stack.Screen name="Models" component={ModelsScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="Privacy" component={PrivacyScreen} />
+        <Stack.Screen name="Reports" component={ReportsScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

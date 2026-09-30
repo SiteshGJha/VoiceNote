@@ -7,4 +7,5 @@ export type RootStackParamList = {
   Models: undefined;
   Settings: undefined;
   Privacy: undefined;
+  Reports: undefined;
 };
