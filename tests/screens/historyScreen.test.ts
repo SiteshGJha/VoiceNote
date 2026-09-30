@@ -69,4 +69,41 @@ describe('HistoryScreen: Empty State + Loading State', () => {
     unmount();
     resolvePromise([]);
   });
+
+  it('filters notes when user types into the search bar', async () => {
+    const r1 = {
+      id: 'rec-1',
+      timestamp: new Date().toISOString(),
+      rawText: 'Apple banana cherry',
+      finalText: 'Apple banana cherry.',
+      tone: 'professional' as const,
+      lang: 'en' as const,
+      audioDurationMs: 1000,
+      processingDurationMs: 500,
+    };
+    const r2 = {
+      id: 'rec-2',
+      timestamp: new Date().toISOString(),
+      rawText: 'Dog elephant fox',
+      finalText: 'Dog elephant fox.',
+      tone: 'casual' as const,
+      lang: 'en' as const,
+      audioDurationMs: 1000,
+      processingDurationMs: 500,
+    };
+
+    jest.spyOn(historyStorage, 'listRecords').mockResolvedValue([r1, r2]);
+    const { findByText, queryByText, getByPlaceholderText } = render(
+      React.createElement(HistoryScreen)
+    );
+
+    expect(await findByText('Apple banana cherry.')).toBeTruthy();
+    expect(await findByText('Dog elephant fox.')).toBeTruthy();
+
+    const searchInput = getByPlaceholderText(/search/i);
+    searchInput.props.onChangeText('Apple');
+
+    expect(await findByText('Apple banana cherry.')).toBeTruthy();
+    expect(queryByText('Dog elephant fox.')).toBeNull();
+  });
 });

@@ -317,6 +317,24 @@ export function render(element: React.ReactElement): RenderResult {
         (node) => node?.props?.testID === testId || node?.props?.testId === testId
       );
     },
+    getByPlaceholderText: (matcher: string | RegExp) => {
+      if (isDirty) {
+        executeRender(currentElement);
+        flushEffects();
+      }
+      const found = findByPredicate(vdom, (node) => matchesText(node?.props?.placeholder, matcher));
+      if (!found) {
+        throw new Error(`Element with placeholder "${matcher}" not found`);
+      }
+      return found;
+    },
+    queryByPlaceholderText: (matcher: string | RegExp) => {
+      if (isDirty) {
+        executeRender(currentElement);
+        flushEffects();
+      }
+      return findByPredicate(vdom, (node) => matchesText(node?.props?.placeholder, matcher));
+    },
     getByText: (matcher: string | RegExp) => {
       if (isDirty) {
         executeRender(currentElement);

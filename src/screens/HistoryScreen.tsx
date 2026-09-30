@@ -14,18 +14,22 @@ import {
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation } from '@react-navigation/native';
 import { Header } from '@/components/Header';
+import { HistorySearchBar } from '@/components/HistorySearchBar';
+import { HistoryFilterFAB, HistoryFilterType } from '@/components/HistoryFilterFAB';
 import { historyStorage } from '@/services/history';
 import { TranscriptionRecord } from '@/services/history/types';
 import { useSystemTheme } from '@/utils/theme';
 import { haptics } from '@/utils/haptics';
 
 export const HistoryScreen: React.FC = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const theme = useSystemTheme();
 
   const isMountedRef = useRef(true);
   const [isLoading, setIsLoading] = useState(true);
   const [records, setRecords] = useState<TranscriptionRecord[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeFilter, setActiveFilter] = useState<HistoryFilterType>('all');
   const [selectedRecord, setSelectedRecord] = useState<TranscriptionRecord | null>(null);
   const [copiedToast, setCopiedToast] = useState(false);
 
@@ -158,17 +162,40 @@ export const HistoryScreen: React.FC = () => {
     );
   };
 
+  const filteredRecords = records.filter((r) => {
+    // 1. Search query match
+    if (searchQuery.trim().length > 0) {
+      const q = searchQuery.toLowerCase();
+      const matchText = (r.finalText ?? '').toLowerCase().includes(q) || (r.rawText ?? '').toLowerCase().includes(q);
+      if (!matchText) return false;
+    }
+
+    // 2. Chip filter match
+    if (activeFilter === 'pro') return r.tone === 'professional';
+    if (activeFilter === 'casual') return r.tone === 'casual';
+    if (activeFilter === 'en') return r.lang === 'en';
+    if (activeFilter === 'hi') return r.lang === 'hi';
+
+    return true;
+  });
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]}>
       <Header
         title="History"
-        subtitle={`${records.length} / 50 encrypted notes`}
+        subtitle={`${records.length} / 500 encrypted notes`}
         onBack={() => navigation.goBack()}
         rightAction={{
-          icon: '🗑',
-          label: 'Clear all history',
-          onPress: handleClearAll,
+          icon: '📊',
+          label: 'View Reports',
+          onPress: () => navigation.navigate('Reports'),
         }}
+      />
+
+      <HistorySearchBar
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        onClear={() => setSearchQuery('')}
       />
 
       {isLoading ? (
@@ -180,24 +207,35 @@ export const HistoryScreen: React.FC = () => {
           />
         </View>
       ) : (
-        <FlatList
-          data={records}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          contentContainerStyle={[
-            styles.listContent,
-            records.length === 0 && styles.emptyListContent,
-          ]}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={[styles.emptyIcon, { color: theme.textMuted }]}>📝</Text>
-              <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>No Notes Yet</Text>
-              <Text style={[styles.emptySubtitle, { color: theme.textSecondary }]}>
-                No notes yet — tap the mic to record your first note.
-              </Text>
-            </View>
-          }
-        />
+        <>
+          <FlatList
+            data={filteredRecords}
+            keyExtractor={(item) => item.id}
+            renderItem={renderItem}
+            contentContainerStyle={[
+              styles.listContent,
+              filteredRecords.length === 0 && styles.emptyListContent,
+            ]}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Text style={[styles.emptyIcon, { color: theme.textMuted }]}>📝</Text>
+                <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>
+                  {records.length === 0 ? 'No Notes Yet' : 'No Matching Notes'}
+                </Text>
+                <Text style={[styles.emptySubtitle, { color: theme.textSecondary }]}>
+                  {records.length === 0
+                    ? 'No notes yet — tap the mic to record your first note.'
+                    : 'Try adjusting your search query or filter chips.'}
+                </Text>
+              </View>
+            }
+          />
+
+          <HistoryFilterFAB
+            activeFilter={activeFilter}
+            onSelectFilter={setActiveFilter}
+          />
+        </>
       )}
 
       {/* Detail Modal */}
