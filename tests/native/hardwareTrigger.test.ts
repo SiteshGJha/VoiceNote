@@ -61,15 +61,21 @@ describe('hardwareTrigger & useHardwareTrigger', () => {
     expect(addListenerSpy).toHaveBeenCalledWith('VoiceNoteHardwareTrigger', expect.any(Function));
 
     // Simulate first hardware press
+    const now = Date.now();
+    const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(now);
+
     const listener = mockListeners['VoiceNoteHardwareTrigger'];
     expect(listener).toBeDefined();
 
     listener?.({ button: 'volume' });
     expect(onTrigger).not.toHaveBeenCalled();
 
-    // Simulate second hardware press within 400ms
+    // Simulate second hardware press 150ms later (well within 400ms window)
+    dateSpy.mockReturnValue(now + 150);
     listener?.({ button: 'volume' });
     expect(onTrigger).toHaveBeenCalledTimes(1);
+
+    dateSpy.mockRestore();
 
     // Unmount should cleanup
     unmount();
