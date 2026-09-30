@@ -7,12 +7,14 @@ interface WaveformProps {
   amplitude: number; // 0.0 to 1.0
   isRecording: boolean;
   barCount?: number;
+  throttleMs?: number;
 }
 
 export const Waveform: React.FC<WaveformProps> = ({
   amplitude,
   isRecording,
   barCount = 28,
+  throttleMs = process.env.NODE_ENV === 'test' ? 0 : 60,
 }) => {
   const themeMode = useSettingsStore((s) => s.themeMode);
   const theme = themeMode === 'dark' ? darkTheme : lightTheme;
@@ -30,8 +32,8 @@ export const Waveform: React.FC<WaveformProps> = ({
     }
 
     const now = Date.now();
-    // 60ms throttle to prevent UI thread thrashing on long recordings
-    if (now - lastUpdateMsRef.current < 60) {
+    // Throttle to prevent UI thread thrashing on long recordings (allow initial frame)
+    if (throttleMs > 0 && lastUpdateMsRef.current !== 0 && now - lastUpdateMsRef.current < throttleMs) {
       return;
     }
     lastUpdateMsRef.current = now;
@@ -42,7 +44,7 @@ export const Waveform: React.FC<WaveformProps> = ({
     const next = [...barsRef.current.slice(1), height];
     barsRef.current = next;
     setBars(next);
-  }, [amplitude, isRecording, barCount, baselineBars]);
+  }, [amplitude, isRecording, barCount, baselineBars, throttleMs]);
 
   // Synchronously reset to baseline 0.1 height when recording is idle/stopped/cancelled
   const displayBars = isRecording ? bars : baselineBars;

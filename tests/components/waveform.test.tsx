@@ -52,4 +52,18 @@ describe('Waveform Animation Optimisation', () => {
     const lastHeight = lastChild.props.style.find((s: any) => s.height !== undefined).height;
     expect(lastHeight).toBe(14);
   });
+
+  it('throttles amplitude updates when throttleMs is configured', () => {
+    const { rerender, getByRole } = render(
+      <Waveform amplitude={0.0} isRecording={true} barCount={10} throttleMs={100} />
+    );
+    // Immediately rerender within throttle window
+    rerender(<Waveform amplitude={0.8} isRecording={true} barCount={10} throttleMs={100} />);
+    const container = getByRole('image');
+    const children = container.props.children;
+    const lastChild = children[children.length - 1];
+    const lastHeight = lastChild.props.style.find((s: any) => s.height !== undefined).height;
+    // Should still be baseline (4) because update was throttled
+    expect(lastHeight).toBe(4);
+  });
 });

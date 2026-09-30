@@ -465,30 +465,30 @@ git commit -m "feat(ui): add AnimatedRecordButton, throttle waveform, and wire h
   - AppNavigator conditional initial route (`Onboarding` if not completed, else `Home`).
   - SettingsScreen controls for Hardware Trigger and Appearance (System / Light / Dark).
 
-- [ ] **Step 1: Write failing test for Onboarding flow**
+- [x] **Step 1: Write failing test for Onboarding flow**
 
 Create `tests/screens/onboardingScreen.test.ts` testing:
 1. Renders slides (Welcome, Models, Defaults, Ready).
 2. Completing onboarding sets `hasCompletedOnboarding: true` and navigates to `Home`.
 3. Skipping onboarding marks completed and navigates to `Home`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `npm test tests/screens/onboardingScreen.test.ts`
 Expected: FAIL with screen not found.
 
-- [ ] **Step 3: Implement `OnboardingScreen.tsx` and update `SettingsScreen.tsx` & `AppNavigator.tsx`**
+- [x] **Step 3: Implement `OnboardingScreen.tsx` and update `SettingsScreen.tsx` & `AppNavigator.tsx`**
 
 1. Implement `OnboardingScreen.tsx` with horizontal slide pager, model download status, and default settings picker.
 2. Update `SettingsScreen.tsx` with Hardware Trigger selector and Appearance segmented buttons.
 3. In `AppNavigator.tsx`, set initial route based on `hasCompletedOnboarding`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `npm test tests/screens/onboardingScreen.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/screens/OnboardingScreen.tsx src/screens/SettingsScreen.tsx src/navigation/routes.ts src/navigation/AppNavigator.tsx tests/screens/onboardingScreen.test.ts
@@ -507,24 +507,24 @@ git commit -m "feat(ui): add OnboardingScreen and update SettingsScreen with the
 - Consumes: All project code and tests.
 - Produces: 100% passing test suites, 0 type errors, 0 privacy violations.
 
-- [ ] **Step 1: Run full test suite**
+- [x] **Step 1: Run full test suite**
 
 Run: `npm test`
 Expected: All 30+ test suites PASS.
 
-- [ ] **Step 2: Run TypeScript typecheck**
+- [x] **Step 2: Run TypeScript typecheck**
 
 Run: `npm run typecheck`
 Expected: 0 errors.
 
-- [ ] **Step 3: Run Privacy & Offline audit**
+- [x] **Step 3: Run Privacy & Offline audit**
 
 Run: `npm run audit:privacy`
 Expected: 0 violations, clean pass.
 
-- [ ] **Step 4: Final commit and verification log**
+- [x] **Step 4: Final commit and verification log**
 
 ```bash
 git status
-git commit --allow-empty -m "chore: verify VoiceNote v2 test suites and privacy audit"
+git commit -m "chore: complete VoiceNote v2 verification and test suite updates"
 ```

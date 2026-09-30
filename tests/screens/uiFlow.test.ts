@@ -150,9 +150,9 @@ describe('Phase 6: UI Flows & Production Hardening', () => {
       expect(records).toHaveLength(0);
     });
 
-    it('strictly enforces the 50-item cap by evicting oldest records (FIFO)', async () => {
-      // Seed 55 notes
-      for (let i = 1; i <= 55; i++) {
+    it('strictly enforces the 500-item cap by evicting oldest records (FIFO)', async () => {
+      // Seed 505 notes
+      for (let i = 1; i <= 505; i++) {
         await historyStorage.addRecord({
           rawText: `Note #${i}`,
           finalText: `Clean Note #${i}`,
@@ -164,10 +164,10 @@ describe('Phase 6: UI Flows & Production Hardening', () => {
       }
 
       const records = await historyStorage.listRecords();
-      expect(records.length).toBe(50);
+      expect(records.length).toBe(500);
 
-      // The newest note should be #55, and the oldest preserved should be #6 (#1-#5 evicted)
-      expect(records[0]?.finalText).toBe('Clean Note #55');
+      // The newest note should be #505, and the oldest preserved should be #6 (#1-#5 evicted)
+      expect(records[0]?.finalText).toBe('Clean Note #505');
       expect(records[records.length - 1]?.finalText).toBe('Clean Note #6');
     });
   });

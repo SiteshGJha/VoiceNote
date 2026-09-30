@@ -12,6 +12,8 @@ export interface RenderResult {
   getByLabelText: (label: string | RegExp) => any;
   getByTestId: (testId: string) => any;
   queryByTestId: (testId: string) => any;
+  getByPlaceholderText: (matcher: string | RegExp) => any;
+  queryByPlaceholderText: (matcher: string | RegExp) => any;
   getByText: (matcher: string | RegExp) => any;
   queryByText: (matcher: string | RegExp) => any;
   findByText: (matcher: string | RegExp, options?: { timeout?: number; interval?: number }) => Promise<any>;
