@@ -13,7 +13,8 @@
     "test:coverage": "jest --coverage",
     "lint": "eslint src/ --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "audit:privacy": "node scripts/privacy-audit.js"
+    "audit:privacy": "node scripts/privacy-audit.js",
+    "postinstall": "node scripts/patch-react-native-macos.js"
   },
   "dependencies": {
     "@react-native-clipboard/clipboard": "^1.14.0",
