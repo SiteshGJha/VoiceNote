@@ -12,6 +12,9 @@ interface SettingsStore extends UserSettings {
   setHindiOutputFormat: (format: HindiOutputFormat) => void;
   setThemeMode: (theme: ThemeMode) => void;
   setHapticsEnabled: (enabled: boolean) => void;
+  setHardwareTriggerButton: (button: 'volume' | 'headphone' | 'none') => void;
+  setMaxHistoryRecords: (max: number) => void;
+  setHasCompletedOnboarding: (completed: boolean) => void;
   resetAllSettings: () => void;
 }
 
@@ -51,6 +54,21 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
   setHapticsEnabled: (hapticsEnabled: boolean) => {
     logger.info('SettingsStore', `Haptics enabled: ${hapticsEnabled}`);
     set({ hapticsEnabled });
+  },
+
+  setHardwareTriggerButton: (hardwareTriggerButton: 'volume' | 'headphone' | 'none') => {
+    logger.info('SettingsStore', `Hardware trigger button updated to ${hardwareTriggerButton}`);
+    set({ hardwareTriggerButton });
+  },
+
+  setMaxHistoryRecords: (maxHistoryRecords: number) => {
+    logger.info('SettingsStore', `Max history records updated to ${maxHistoryRecords}`);
+    set({ maxHistoryRecords });
+  },
+
+  setHasCompletedOnboarding: (hasCompletedOnboarding: boolean) => {
+    logger.info('SettingsStore', `Onboarding completed state updated to ${hasCompletedOnboarding}`);
+    set({ hasCompletedOnboarding });
   },
 
   resetAllSettings: () => {

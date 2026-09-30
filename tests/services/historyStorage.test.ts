@@ -25,10 +25,10 @@ describe('History Storage Persistence & FIFO Eviction', () => {
     expect(records[0]?.rawText).toBe('hello');
   });
 
-  it('enforces strict FIFO eviction at 50 records', async () => {
-    expect(MAX_HISTORY_RECORDS).toBe(50);
+  it('enforces strict FIFO eviction at 500 records', async () => {
+    expect(MAX_HISTORY_RECORDS).toBe(500);
 
-    for (let i = 1; i <= 55; i++) {
+    for (let i = 1; i <= 505; i++) {
       await historyStorage.addRecord({
         rawText: `Raw note number ${i}`,
         finalText: `Final note number ${i}`,
@@ -40,10 +40,73 @@ describe('History Storage Persistence & FIFO Eviction', () => {
     }
 
     const records = await historyStorage.listRecords();
-    expect(records.length).toBe(50);
-    expect(records[0]?.rawText).toBe('Raw note number 55');
+    expect(records.length).toBe(500);
+    expect(records[0]?.rawText).toBe('Raw note number 505');
     const oldestRecord = records[records.length - 1];
     expect(oldestRecord?.rawText).toBe('Raw note number 6');
+  });
+
+  it('automatically calculates wordCount and sets schema version _v: 2 on addRecord', async () => {
+    const record = await historyStorage.addRecord({
+      rawText: 'This is a quick test of the emergency broadcast system',
+      finalText: 'This is a quick test of the emergency broadcast system.',
+      tone: 'professional',
+      lang: 'en',
+      audioDurationMs: 3000,
+      processingDurationMs: 400,
+    });
+
+    expect(record.wordCount).toBe(10);
+    expect(record._v).toBe(2);
+  });
+
+  it('backfills wordCount and _v on legacy v1 records during initialization', async () => {
+    const legacyRecord = {
+      id: 'legacy_1',
+      timestamp: new Date().toISOString(),
+      rawText: 'hello world',
+      finalText: 'Hello world from yesterday.',
+      tone: 'casual',
+      lang: 'en',
+      audioDurationMs: 1200,
+      processingDurationMs: 200,
+      // Notice: _v and wordCount are missing
+    };
+
+    const storageInstance = (historyStorage as any).storage;
+    storageInstance.set('records', JSON.stringify([legacyRecord]));
+
+    (historyStorage as any).records = [];
+    (historyStorage as any).isInitialized = false;
+
+    const records = await historyStorage.listRecords();
+    expect(records).toHaveLength(1);
+    expect(records[0]?.wordCount).toBe(4);
+    expect(records[0]?._v).toBe(2);
+  });
+
+  it('supports querying records by date range using getDateRange', async () => {
+    const t0 = 1700000000000;
+    const r1 = await historyStorage.addRecord({
+      rawText: 'One',
+      finalText: 'One note.',
+      tone: 'professional',
+      lang: 'en',
+      audioDurationMs: 1000,
+      processingDurationMs: 100,
+    });
+    // Manually adjust timestamp for deterministic range test
+    r1.timestamp = new Date(t0).toISOString();
+    const storageInstance = (historyStorage as any).storage;
+    storageInstance.set('records', JSON.stringify([r1]));
+    (historyStorage as any).records = [r1];
+
+    const inRange = await historyStorage.getDateRange(t0 - 1000, t0 + 1000);
+    expect(inRange).toHaveLength(1);
+    expect(inRange[0]?.id).toBe(r1.id);
+
+    const outOfRange = await historyStorage.getDateRange(t0 + 5000, t0 + 10000);
+    expect(outOfRange).toHaveLength(0);
   });
 
   it('supports deleting an individual record', async () => {

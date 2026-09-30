@@ -17,6 +17,9 @@ export interface UserSettings {
   hindiOutputFormat: HindiOutputFormat;
   themeMode: ThemeMode;
   hapticsEnabled: boolean;
+  hardwareTriggerButton: 'volume' | 'headphone' | 'none';
+  maxHistoryRecords: number;
+  hasCompletedOnboarding: boolean;
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -27,4 +30,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   hindiOutputFormat: 'devanagari',
   themeMode: 'system',
   hapticsEnabled: true,
+  hardwareTriggerButton: 'volume',
+  maxHistoryRecords: 500,
+  hasCompletedOnboarding: false,
 };

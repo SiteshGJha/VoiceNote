@@ -9,6 +9,15 @@ export interface TranscriptionRecord {
   lang: DetectedLang;
   audioDurationMs: number;
   processingDurationMs: number;
+  _v?: number | undefined;
+  wordCount?: number | undefined;
+  durationMs?: number | undefined;
+  segmentCount?: number | undefined;
 }
 
-export type HistoryRecordInput = Omit<TranscriptionRecord, 'id' | 'timestamp'>;
+export type HistoryRecordInput = Omit<TranscriptionRecord, 'id' | 'timestamp'> & {
+  wordCount?: number | undefined;
+  durationMs?: number | undefined;
+  segmentCount?: number | undefined;
+  _v?: number | undefined;
+};

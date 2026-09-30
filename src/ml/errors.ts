@@ -7,7 +7,10 @@ export type MlErrorCode =
   | 'MODEL_CHECKSUM_FAILED'
   | 'STORAGE_FULL'
   | 'AUDIO_RECORD_FAILED'
-  | 'VAD_NO_SPEECH';
+  | 'VAD_NO_SPEECH'
+  | 'SEGMENT_MERGE_FAILED'
+  | 'RECORDING_LIMIT_REACHED'
+  | 'HARDWARE_TRIGGER_DENIED';
 
 export class MlError extends Error {
   public readonly code: MlErrorCode;
@@ -51,6 +54,12 @@ export function getUserFacingErrorMessage(code: MlErrorCode): string {
       return 'Audio recording failed. Please check microphone permissions.';
     case 'VAD_NO_SPEECH':
       return 'No speech detected in recording.';
+    case 'SEGMENT_MERGE_FAILED':
+      return 'Could not seamlessly merge audio segments — saved with segment markers.';
+    case 'RECORDING_LIMIT_REACHED':
+      return 'Maximum recording limit reached (30 minutes). Audio has been processed.';
+    case 'HARDWARE_TRIGGER_DENIED':
+      return 'Hardware button listener could not be registered.';
     default:
       return 'An unexpected error occurred.';
   }
