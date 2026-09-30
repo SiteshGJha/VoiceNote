@@ -1,10 +1,10 @@
 import { audioRecorder } from '@/audio/recorder';
-import { RecordedAudio } from '@/audio/types';
 import { transcribe } from '@/ml/asr';
 import { rewrite } from '@/ml/slm';
 import { PipelineResult, DetectedLang } from '@/ml/types';
 import { historyStorage } from '@/services/history';
-import { PipelineExecutionOptions, PipelineStageCallback } from './types';
+import { AudioPipelineInput, PipelineExecutionOptions, PipelineStageCallback } from './types';
+import { mergeSegments } from '@/audio/segmentMerger';
 import { logger } from '@/utils/logger';
 
 /**
@@ -12,12 +12,16 @@ import { logger } from '@/utils/logger';
  * Connects: Audio Capture -> VAD -> ASR -> STRICT AUDIO DELETE -> SLM Rewrite -> History Store.
  */
 export async function executePipeline(
-  audio: RecordedAudio,
+  audio: AudioPipelineInput,
   options: PipelineExecutionOptions,
   onStageChange?: PipelineStageCallback
 ): Promise<PipelineResult> {
   const pipelineStartTime = Date.now();
-  logger.info('Pipeline', `Executing pipeline for ${audio.uri}, duration=${audio.durationMs}ms`);
+  const isChunked = 'segments' in audio;
+  const totalAudioDuration = isChunked ? audio.totalDurationMs : audio.durationMs;
+  const segmentList = isChunked ? audio.segments : [{ uri: audio.uri, durationMs: audio.durationMs, index: 0 }];
+
+  logger.info('Pipeline', `Executing pipeline for ${isChunked ? `${segmentList.length} segments` : audio.uri}, duration=${totalAudioDuration}ms`);
 
   let rawTranscript = '';
   let detectedLanguage: DetectedLang = 'en';
@@ -28,28 +32,33 @@ export async function executePipeline(
     // 1. Stage: Speech-to-Text (ASR)
     onStageChange?.('asr');
     const asrStart = Date.now();
-    const asrResult = await transcribe(audio.uri, {
-      lang: options.lang,
-      hindiOutput: options.hindiOutput,
-      asrTier: options.asrTier,
-    });
-    asrDuration = Date.now() - asrStart;
+    const segmentTranscripts: string[] = [];
 
-    // 2. Prime Directive: Immediately delete temporary audio file post-ASR, regardless of result!
-    await audioRecorder.cleanupTempFile(audio.uri);
-    logger.info('Pipeline', 'Audio file cleanup completed immediately after ASR step');
+    for (const seg of segmentList) {
+      const segResult = await transcribe(seg.uri, {
+        lang: options.lang,
+        hindiOutput: options.hindiOutput,
+        asrTier: options.asrTier,
+      });
 
-    if (asrResult.status === 'error') {
-      logger.warn('Pipeline', `ASR failed with code: ${asrResult.code}`);
-      return {
-        status: 'error',
-        code: asrResult.code,
-        message: asrResult.message,
-      };
+      // Prime Directive: Immediately delete temporary audio file post-ASR, regardless of result!
+      await audioRecorder.cleanupTempFile(seg.uri);
+
+      if (segResult.status === 'error') {
+        logger.warn('Pipeline', `ASR failed for segment ${seg.index} with code: ${segResult.code}`);
+        return {
+          status: 'error',
+          code: segResult.code,
+          message: segResult.message,
+        };
+      }
+
+      segmentTranscripts.push(segResult.text);
+      detectedLanguage = segResult.detectedLang;
     }
 
-    rawTranscript = asrResult.text;
-    detectedLanguage = asrResult.detectedLang;
+    asrDuration = Date.now() - asrStart;
+    rawTranscript = mergeSegments(segmentTranscripts);
 
     // 3. Stage: Tone Rewriting (SLM)
     let finalRewrittenText = rawTranscript;
@@ -81,8 +90,10 @@ export async function executePipeline(
       finalText: finalRewrittenText,
       tone: options.tone,
       lang: detectedLanguage,
-      audioDurationMs: audio.durationMs,
+      audioDurationMs: totalAudioDuration,
       processingDurationMs: totalDurationMs,
+      durationMs: totalAudioDuration,
+      segmentCount: segmentList.length,
     });
 
     onStageChange?.('done');
@@ -95,14 +106,16 @@ export async function executePipeline(
       tone: options.tone,
       lang: detectedLanguage,
       totalDurationMs,
-      audioDurationMs: audio.durationMs,
+      audioDurationMs: totalAudioDuration,
       asrDurationMs: asrDuration,
       slmDurationMs: slmDuration,
       usedFallback,
     };
   } catch (err) {
     // Always guarantee audio cleanup on unexpected pipeline error
-    await audioRecorder.cleanupTempFile(audio.uri);
+    for (const seg of segmentList) {
+      await audioRecorder.cleanupTempFile(seg.uri);
+    }
     logger.error('Pipeline', 'Unexpected exception in pipeline execution', err);
 
     return {

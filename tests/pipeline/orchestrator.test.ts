@@ -107,5 +107,45 @@ describe('Pipeline Orchestrator & Audio File Cleanup', () => {
       expect(result.slmDurationMs).toBe(0);
     }
   });
+
+  it('supports multi-segment chunked pipeline execution and cleans up all temp segment files', async () => {
+    const tempDir = os.tmpdir();
+    const f1 = path.join(tempDir, `test_seg_1_${Date.now()}.wav`);
+    const f2 = path.join(tempDir, `test_seg_2_${Date.now()}.wav`);
+    fs.writeFileSync(f1, Buffer.from('RIFF....WAVEfmt ....data....'));
+    fs.writeFileSync(f2, Buffer.from('RIFF....WAVEfmt ....data....'));
+
+    const segmentedInput = {
+      segments: [
+        { uri: f1, durationMs: 30000, index: 0 },
+        { uri: f2, durationMs: 15000, index: 1 },
+      ],
+      totalDurationMs: 45000,
+    };
+
+    const stages: string[] = [];
+    const result = await executePipeline(
+      segmentedInput as any,
+      {
+        tone: 'professional',
+        lang: 'en',
+      },
+      (stage) => {
+        stages.push(stage);
+      }
+    );
+
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') {
+      expect(result.audioDurationMs).toBe(45000);
+      expect(typeof result.raw).toBe('string');
+      expect(typeof result.final).toBe('string');
+    }
+
+    // Both segment temp files must be deleted
+    expect(fs.existsSync(f1)).toBe(false);
+    expect(fs.existsSync(f2)).toBe(false);
+  });
 });
+
 
