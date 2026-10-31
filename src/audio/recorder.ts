@@ -7,6 +7,7 @@ import { AudioMeteringData, RecordedAudio, RecordingState } from './types';
 import { audioWorker } from '@/native/audioWorker';
 import { nativeAudio } from '@/native/nativeAudio';
 import { trimSilence } from './silenceTrim';
+import { getRustCore } from '@/native/rustCore';
 import { logger } from '@/utils/logger';
 
 export type AudioDataListener = (chunk: Uint8Array, metering: AudioMeteringData) => void;
@@ -123,8 +124,8 @@ class AudioRecorderService {
 
     await audioWorker.stopCapture();
 
-    const durationMs = Date.now() - this.startTime;
-    logger.info('AudioRecorder', `Recording stopped. Total duration: ${durationMs}ms, bytes: ${this.totalByteLength}`);
+    const elapsedMs = Date.now() - this.startTime;
+    logger.info('AudioRecorder', `Recording stopped. Total duration: ${elapsedMs}ms, bytes: ${this.totalByteLength}`);
 
     if (this.totalByteLength === 0) {
       this.state = 'idle';
@@ -139,27 +140,45 @@ class AudioRecorderService {
       offset += chunk.length;
     }
 
-    // Apply automatic silence trimming with 200 ms phoneme padding
-    const trimResult = trimSilence(mergedPcm, { paddingMs: 200, frameMs: 30 });
-    const finalPcm = trimResult.hasSpeech ? trimResult.trimmedPcm : mergedPcm;
-
-    // Wrap with standard 44-byte WAV header
-    const wavBytes = wrapPcmWithWavHeader(finalPcm);
-
-    // Write to temporary cache directory
+    // Prepare temporary WAV output file path in cache directory
     const tempDir = os.tmpdir();
     const tempFile = path.join(tempDir, `voicenote_temp_${Date.now()}.wav`);
-    fs.writeFileSync(tempFile, Buffer.from(wavBytes.buffer, wavBytes.byteOffset, wavBytes.byteLength));
+
+    const rustCore = getRustCore();
+    let hasSpeech = false;
+
+    if (rustCore && typeof rustCore.trimAndSaveWav === 'function') {
+      const pcmBuffer =
+        mergedPcm.byteOffset === 0 && mergedPcm.byteLength === mergedPcm.buffer.byteLength
+          ? mergedPcm.buffer
+          : mergedPcm.buffer.slice(mergedPcm.byteOffset, mergedPcm.byteOffset + mergedPcm.byteLength);
+      const res = rustCore.trimAndSaveWav(pcmBuffer, tempFile, 200);
+      hasSpeech = res.hasSpeech;
+    } else {
+      // Apply automatic silence trimming with 200 ms phoneme padding
+      const trimResult = trimSilence(mergedPcm, { paddingMs: 200, frameMs: 30 });
+      hasSpeech = trimResult.hasSpeech;
+      const finalPcm = trimResult.hasSpeech ? trimResult.trimmedPcm : mergedPcm;
+      const wavBytes = wrapPcmWithWavHeader(finalPcm);
+      fs.writeFileSync(tempFile, Buffer.from(wavBytes.buffer, wavBytes.byteOffset, wavBytes.byteLength));
+    }
+
     this.currentTempUri = tempFile;
     this.state = 'idle';
 
+    const fileExists = fs.existsSync(tempFile);
+    const byteLength = fileExists ? fs.statSync(tempFile).size : 0;
+    const durationMs = fileExists && byteLength >= 44
+      ? calculateDurationMs(byteLength - 44)
+      : 0;
+
     return {
       uri: tempFile,
-      durationMs: calculateDurationMs(finalPcm.byteLength),
+      durationMs,
       sampleRate: SAMPLE_RATE,
       channels: 1,
-      byteLength: wavBytes.byteLength,
-      hasSpeech: trimResult.hasSpeech,
+      byteLength,
+      hasSpeech,
     };
   }
 

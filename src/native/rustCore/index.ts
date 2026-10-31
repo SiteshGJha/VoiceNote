@@ -1,4 +1,7 @@
+import * as fs from 'fs';
 import { IRustCoreHybridObject } from './types';
+import { trimSilence } from '@/audio/silenceTrim';
+import { wrapPcmWithWavHeader } from '@/audio/wavUtils';
 
 export * from './types';
 
@@ -25,9 +28,23 @@ export function getRustCore(): IRustCoreHybridObject | null {
   } catch {
     // In Node / Jest / Simulator environments without native Nitro compiled
   }
-  return {
+  cachedInstance = {
     getVersion: () => '0.1.0-mock',
+    trimAndSaveWav: (pcm: ArrayBuffer, outputPath: string, paddingMs: number = 200) => {
+      const uint8 = new Uint8Array(pcm);
+      const trimResult = trimSilence(uint8, { paddingMs, frameMs: 30 });
+      if (!trimResult.hasSpeech) {
+        if (fs.existsSync(outputPath)) {
+          fs.unlinkSync(outputPath);
+        }
+        return { hasSpeech: false, status: 0 };
+      }
+      const wavBytes = wrapPcmWithWavHeader(trimResult.trimmedPcm);
+      fs.writeFileSync(outputPath, Buffer.from(wavBytes.buffer, wavBytes.byteOffset, wavBytes.byteLength));
+      return { hasSpeech: true, status: 1 };
+    },
   };
+  return cachedInstance;
 }
 
 /**
