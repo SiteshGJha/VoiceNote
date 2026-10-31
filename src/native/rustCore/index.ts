@@ -2,17 +2,24 @@ import { IRustCoreHybridObject } from './types';
 
 export * from './types';
 
-declare const NitroModules: {
+interface NitroProvider {
   createHybridObject<T>(name: string): T;
-} | undefined;
+}
+
+interface GlobalWithNitro {
+  NitroModules?: NitroProvider;
+  NitroModulesProxy?: NitroProvider;
+}
 
 let cachedInstance: IRustCoreHybridObject | null = null;
 
 export function getRustCore(): IRustCoreHybridObject | null {
   if (cachedInstance) return cachedInstance;
   try {
-    if (typeof NitroModules !== 'undefined' && typeof NitroModules.createHybridObject === 'function') {
-      cachedInstance = NitroModules.createHybridObject<IRustCoreHybridObject>('RustCore');
+    const globalContext = globalThis as unknown as GlobalWithNitro;
+    const provider = globalContext.NitroModulesProxy ?? globalContext.NitroModules;
+    if (provider && typeof provider.createHybridObject === 'function') {
+      cachedInstance = provider.createHybridObject<IRustCoreHybridObject>('RustCore');
       return cachedInstance;
     }
   } catch {

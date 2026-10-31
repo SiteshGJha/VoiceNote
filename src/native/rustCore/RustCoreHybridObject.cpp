@@ -1,5 +1,6 @@
 #include "RustCoreHybridObject.hpp"
 #include <NitroModules/HybridObjectRegistry.hpp>
+#include <NitroModules/Prototype.hpp>
 
 namespace voicenote {
 std::string RustCoreHybridObject::getVersion() {
@@ -10,7 +11,10 @@ std::string RustCoreHybridObject::getVersion() {
 }
 
 void RustCoreHybridObject::loadHybridMethods() {
-  registerHybridMethod("getVersion", &RustCoreHybridObject::getVersion, this);
+  HybridObject::loadHybridMethods();
+  registerHybrids(this, [](Prototype& prototype) {
+    prototype.registerHybridMethod("getVersion", &RustCoreHybridObject::getVersion);
+  });
 }
 } // namespace voicenote
 

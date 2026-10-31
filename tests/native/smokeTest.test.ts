@@ -1,9 +1,22 @@
 import { __smokeTest, getNativeBridgeStatus } from '@/native/smokeTest';
 import { getRustCore, __setRustCoreInstance } from '@/native/rustCore';
 
+interface GlobalWithNitro {
+  NitroModules?: {
+    createHybridObject: jest.Mock;
+  };
+  NitroModulesProxy?: {
+    createHybridObject: jest.Mock;
+  };
+}
+
+const testGlobal = globalThis as unknown as GlobalWithNitro;
+
 describe('Native Module Smoke Test', () => {
   afterEach(() => {
     __setRustCoreInstance(null);
+    delete testGlobal.NitroModules;
+    delete testGlobal.NitroModulesProxy;
   });
 
   it('passes the required JSI native smoke test per Rule 05', () => {
@@ -37,31 +50,37 @@ describe('Native Module Smoke Test', () => {
       getVersion: jest.fn().mockReturnValue('0.1.0-native-test'),
     };
 
-    (global as any).NitroModules = {
+    testGlobal.NitroModules = {
       createHybridObject: jest.fn().mockReturnValue(mockNitroCore),
     };
 
-    try {
-      const rustCore = getRustCore();
-      expect(rustCore?.getVersion()).toBe('0.1.0-native-test');
-      expect((global as any).NitroModules.createHybridObject).toHaveBeenCalledWith('RustCore');
-    } finally {
-      delete (global as any).NitroModules;
-    }
+    const rustCore = getRustCore();
+    expect(rustCore?.getVersion()).toBe('0.1.0-native-test');
+    expect(testGlobal.NitroModules.createHybridObject).toHaveBeenCalledWith('RustCore');
+  });
+
+  it('getRustCore prioritizes NitroModulesProxy if present', () => {
+    const mockProxyCore = {
+      getVersion: jest.fn().mockReturnValue('0.1.0-proxy-test'),
+    };
+
+    testGlobal.NitroModulesProxy = {
+      createHybridObject: jest.fn().mockReturnValue(mockProxyCore),
+    };
+
+    const rustCore = getRustCore();
+    expect(rustCore?.getVersion()).toBe('0.1.0-proxy-test');
+    expect(testGlobal.NitroModulesProxy.createHybridObject).toHaveBeenCalledWith('RustCore');
   });
 
   it('getRustCore gracefully handles NitroModules throwing', () => {
-    (global as any).NitroModules = {
+    testGlobal.NitroModules = {
       createHybridObject: jest.fn().mockImplementation(() => {
         throw new Error('Native module not linked');
       }),
     };
 
-    try {
-      const rustCore = getRustCore();
-      expect(rustCore?.getVersion()).toBe('0.1.0-mock');
-    } finally {
-      delete (global as any).NitroModules;
-    }
+    const rustCore = getRustCore();
+    expect(rustCore?.getVersion()).toBe('0.1.0-mock');
   });
 });
