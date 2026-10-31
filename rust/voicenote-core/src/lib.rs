@@ -1,4 +1,7 @@
+pub mod audio;
 pub mod errors;
+
+pub use audio::AudioBuffer;
 pub use errors::{VnError, VnErrorCode};
 
 use std::ffi::CString;
