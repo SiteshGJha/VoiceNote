@@ -87,3 +87,6 @@ ios/**/*.mobileprovision
 .gemini/
 scratch/
 .worktrees/
+
+# Rust build target
+rust/target/

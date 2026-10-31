@@ -1,0 +1,3 @@
+[workspace]
+members = ["voicenote-core"]
+resolver = "2"

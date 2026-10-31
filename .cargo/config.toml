@@ -1,0 +1,5 @@
+[alias]
+build-macos = "build --package voicenote-core"
+build-ios = "build --package voicenote-core --target aarch64-apple-ios"
+build-ios-sim = "build --package voicenote-core --target aarch64-apple-ios-sim"
+build-android = "ndk -t aarch64-linux-android -p 29 -o ../android/app/src/main/jniLibs build --package voicenote-core"
