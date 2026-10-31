@@ -28,6 +28,11 @@
  */
 #define DEFAULT_RMS_THRESHOLD 0.04
 
+/**
+ * Standard WAV header size in bytes for linear PCM mono audio.
+ */
+#define WAV_HEADER_SIZE 44
+
 enum VnErrorCode
 #ifdef __cplusplus
   : int32_t
@@ -64,6 +69,31 @@ const char *voicenote_core_version(void);
  * or null. Calling this on any other pointer causes undefined behavior.
  */
 void voicenote_core_version_free(char *ptr);
+
+/**
+ * Trims silence from 16-bit linear PCM audio and saves the result as a standard 16 kHz WAV file.
+ *
+ * # Arguments
+ * * `pcm_ptr` - Pointer to the beginning of the 16-bit PCM sample array.
+ * * `sample_count` - Number of `i16` samples in the input buffer.
+ * * `output_path` - Null-terminated UTF-8 C string pointing to the destination WAV file path.
+ * * `padding_ms` - Phoneme padding duration in milliseconds to preserve around speech.
+ *   If 0 is provided, `DEFAULT_PADDING_MS` (200 ms) is used.
+ *
+ * # Returns
+ * - `1` if speech was detected and a trimmed WAV file was successfully written.
+ * - `0` if the audio was purely silent (no file is written; any stale file at `output_path` is removed).
+ * - A negative error code (`-VnErrorCode`) if an error occurred (e.g. invalid arguments or I/O failure).
+ *
+ * # Safety
+ * - `pcm_ptr` must be a valid, readable pointer to at least `sample_count` contiguous `i16` values,
+ *   unless `sample_count` is 0.
+ * - `output_path` must be a valid, null-terminated C string.
+ */
+int32_t vn_audio_trim_and_save_wav(const int16_t *pcm_ptr,
+                                   uintptr_t sample_count,
+                                   const char *output_path,
+                                   uint32_t padding_ms);
 
 #ifdef __cplusplus
 }  // extern "C"
