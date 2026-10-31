@@ -20,6 +20,11 @@ enum VnErrorCode
   SlmHallucinationSuspected = 202,
   ModelChecksumFailed = 301,
   AudioRecordFailed = 401,
+  VadNoSpeech = 501,
+  SegmentMergeFailed = 601,
+  RecordingLimitReached = 602,
+  HardwareTriggerDenied = 603,
+  StorageFull = 701,
   Unknown = 999,
 };
 #ifndef __cplusplus
@@ -32,6 +37,12 @@ extern "C" {
 
 const char *voicenote_core_version(void);
 
+/**
+ * # Safety
+ *
+ * `ptr` must be a pointer previously allocated by Rust (e.g. via `voicenote_core_version`),
+ * or null. Calling this on any other pointer causes undefined behavior.
+ */
 void voicenote_core_version_free(char *ptr);
 
 #ifdef __cplusplus

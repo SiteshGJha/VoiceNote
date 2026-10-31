@@ -9,12 +9,14 @@ pub extern "C" fn voicenote_core_version() -> *const c_char {
     CString::new("0.1.0").unwrap().into_raw()
 }
 
+/// # Safety
+///
+/// `ptr` must be a pointer previously allocated by Rust (e.g. via `voicenote_core_version`),
+/// or null. Calling this on any other pointer causes undefined behavior.
 #[no_mangle]
-pub extern "C" fn voicenote_core_version_free(ptr: *mut c_char) {
+pub unsafe extern "C" fn voicenote_core_version_free(ptr: *mut c_char) {
     if ptr.is_null() {
         return;
     }
-    unsafe {
-        drop(CString::from_raw(ptr));
-    }
+    drop(CString::from_raw(ptr));
 }

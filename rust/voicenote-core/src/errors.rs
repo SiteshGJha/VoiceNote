@@ -15,6 +15,16 @@ pub enum VnErrorCode {
     ModelChecksumFailed = 301,
     #[error("Audio record failed")]
     AudioRecordFailed = 401,
+    #[error("No speech detected in audio stream")]
+    VadNoSpeech = 501,
+    #[error("Segment merge failed")]
+    SegmentMergeFailed = 601,
+    #[error("Recording duration limit reached")]
+    RecordingLimitReached = 602,
+    #[error("Hardware button trigger access denied")]
+    HardwareTriggerDenied = 603,
+    #[error("Device storage full")]
+    StorageFull = 701,
     #[error("Unknown error")]
     Unknown = 999,
 }
@@ -33,6 +43,11 @@ impl VnErrorCode {
             202 => Self::SlmHallucinationSuspected,
             301 => Self::ModelChecksumFailed,
             401 => Self::AudioRecordFailed,
+            501 => Self::VadNoSpeech,
+            601 => Self::SegmentMergeFailed,
+            602 => Self::RecordingLimitReached,
+            603 => Self::HardwareTriggerDenied,
+            701 => Self::StorageFull,
             _ => Self::Unknown,
         }
     }
@@ -54,6 +69,16 @@ pub enum VnError {
     ModelChecksumFailed(String),
     #[error("Audio record failed: {0}")]
     AudioRecordFailed(String),
+    #[error("No speech detected in audio stream")]
+    VadNoSpeech,
+    #[error("Segment merge failed: {0}")]
+    SegmentMergeFailed(String),
+    #[error("Recording duration limit reached")]
+    RecordingLimitReached,
+    #[error("Hardware button trigger access denied: {0}")]
+    HardwareTriggerDenied(String),
+    #[error("Device storage full")]
+    StorageFull,
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Unknown error: {0}")]
@@ -70,6 +95,11 @@ impl VnError {
             VnError::SlmHallucinationSuspected(_) => VnErrorCode::SlmHallucinationSuspected,
             VnError::ModelChecksumFailed(_) => VnErrorCode::ModelChecksumFailed,
             VnError::AudioRecordFailed(_) => VnErrorCode::AudioRecordFailed,
+            VnError::VadNoSpeech => VnErrorCode::VadNoSpeech,
+            VnError::SegmentMergeFailed(_) => VnErrorCode::SegmentMergeFailed,
+            VnError::RecordingLimitReached => VnErrorCode::RecordingLimitReached,
+            VnError::HardwareTriggerDenied(_) => VnErrorCode::HardwareTriggerDenied,
+            VnError::StorageFull => VnErrorCode::StorageFull,
             VnError::Io(_) => VnErrorCode::Unknown,
             VnError::Unknown(_) => VnErrorCode::Unknown,
         }
@@ -83,9 +113,16 @@ impl From<VnErrorCode> for VnError {
             VnErrorCode::AsrTimeout => VnError::AsrTimeout,
             VnErrorCode::AsrModelMissing => VnError::AsrModelMissing(String::new()),
             VnErrorCode::SlmTimeout => VnError::SlmTimeout,
-            VnErrorCode::SlmHallucinationSuspected => VnError::SlmHallucinationSuspected(String::new()),
+            VnErrorCode::SlmHallucinationSuspected => {
+                VnError::SlmHallucinationSuspected(String::new())
+            }
             VnErrorCode::ModelChecksumFailed => VnError::ModelChecksumFailed(String::new()),
             VnErrorCode::AudioRecordFailed => VnError::AudioRecordFailed(String::new()),
+            VnErrorCode::VadNoSpeech => VnError::VadNoSpeech,
+            VnErrorCode::SegmentMergeFailed => VnError::SegmentMergeFailed(String::new()),
+            VnErrorCode::RecordingLimitReached => VnError::RecordingLimitReached,
+            VnErrorCode::HardwareTriggerDenied => VnError::HardwareTriggerDenied(String::new()),
+            VnErrorCode::StorageFull => VnError::StorageFull,
             VnErrorCode::Unknown => VnError::Unknown(String::new()),
         }
     }

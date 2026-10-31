@@ -4,8 +4,8 @@ use std::path::PathBuf;
 fn main() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let config_path = PathBuf::from(&crate_dir).join("cbindgen.toml");
-    let config = cbindgen::Config::from_file(&config_path)
-        .expect("Unable to find or parse cbindgen.toml");
+    let config =
+        cbindgen::Config::from_file(&config_path).expect("Unable to find or parse cbindgen.toml");
 
     let out_file = PathBuf::from(&crate_dir).join("voicenote_core.h");
 
