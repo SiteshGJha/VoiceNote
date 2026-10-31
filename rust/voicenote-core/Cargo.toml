@@ -9,6 +9,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [dependencies]
 tokio = { version = "1", features = ["rt", "time", "sync"] }
 thiserror = "1"
+tract-onnx = "0.21"
 
 [build-dependencies]
 cbindgen = "0.27"

@@ -33,6 +33,16 @@
  */
 #define WAV_HEADER_SIZE 44
 
+/**
+ * Number of audio samples per VAD evaluation frame (512 samples @ 16 kHz = 32 ms).
+ */
+#define SileroVad_FRAME_SIZE 512
+
+/**
+ * Supported sampling rate for Silero VAD v4.
+ */
+#define SileroVad_SAMPLE_RATE 16000
+
 enum VnErrorCode
 #ifdef __cplusplus
   : int32_t

@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod errors;
+pub mod vad;
 
 pub use audio::{
     trim_silence, trim_silence_with_rate, wrap_pcm_with_wav_header, AudioBuffer, TrimResult,

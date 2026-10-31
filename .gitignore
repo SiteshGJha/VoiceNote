@@ -29,6 +29,7 @@ coverage/
 *.tar.gz
 *.part
 models/
+assets/*.onnx
 fixtures/asr/**/*.wav
 fixtures/asr/**/*.mp3
 fixtures/asr/**/*.m4a
