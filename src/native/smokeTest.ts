@@ -1,10 +1,12 @@
 import { logger } from '@/utils/logger';
+import { getRustCore } from './rustCore';
 
 export interface NativeBridgeStatus {
   isNitroAvailable: boolean;
   isAudioEngineReady: boolean;
   isAsrBridgeReady: boolean;
   isSlmBridgeReady: boolean;
+  rustCoreVersion: string;
   status: 'ok' | 'degraded' | 'unavailable';
 }
 
@@ -23,11 +25,15 @@ export function __smokeTest(): 'ok' | 'fail' {
 }
 
 export function getNativeBridgeStatus(): NativeBridgeStatus {
+  const rustCore = getRustCore();
+  const rustCoreVersion = rustCore ? rustCore.getVersion() : 'unavailable';
+
   return {
     isNitroAvailable: true,
     isAudioEngineReady: true,
     isAsrBridgeReady: true,
     isSlmBridgeReady: true,
+    rustCoreVersion,
     status: 'ok',
   };
 }
