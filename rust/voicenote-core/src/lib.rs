@@ -1,7 +1,7 @@
 pub mod audio;
 pub mod errors;
 
-pub use audio::AudioBuffer;
+pub use audio::{trim_silence, trim_silence_with_rate, AudioBuffer, TrimResult};
 pub use errors::{VnError, VnErrorCode};
 
 use std::ffi::CString;

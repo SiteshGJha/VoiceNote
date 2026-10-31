@@ -8,6 +8,26 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+/**
+ * Default sample rate for VoiceNote audio pipeline (16 kHz).
+ */
+#define DEFAULT_SAMPLE_RATE 16000
+
+/**
+ * Default frame duration for VAD and energy calculations (30 ms).
+ */
+#define DEFAULT_FRAME_MS 30
+
+/**
+ * Default phoneme padding duration (200 ms).
+ */
+#define DEFAULT_PADDING_MS 200
+
+/**
+ * Default normalized speech detection threshold.
+ */
+#define DEFAULT_RMS_THRESHOLD 0.04
+
 enum VnErrorCode
 #ifdef __cplusplus
   : int32_t
