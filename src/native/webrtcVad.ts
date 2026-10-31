@@ -1,5 +1,6 @@
 import { calculateRms } from '@/audio/wavUtils';
 import { VadSensitivity } from '@/audio/vadPresets';
+import { getRustCore } from '@/native/rustCore';
 import { logger } from '@/utils/logger';
 
 export type WebRtcVadMode = 0 | 1 | 2 | 3;
@@ -48,6 +49,29 @@ export class WebRtcVadAdapter {
     sensitivity: VadSensitivity = 'medium'
   ): WebRtcVadResult {
     const mode = SENSITIVITY_TO_WEBRTC_MODE[sensitivity];
+
+    try {
+      const rustCore = getRustCore();
+      if (rustCore && typeof rustCore.evalVad === 'function') {
+        const buffer = (
+          frameBytes.byteOffset === 0 && frameBytes.byteLength === frameBytes.buffer.byteLength
+            ? frameBytes.buffer
+            : frameBytes.buffer.slice(
+                frameBytes.byteOffset,
+                frameBytes.byteOffset + frameBytes.byteLength
+              )
+        ) as ArrayBuffer;
+        const result = rustCore.evalVad(buffer, mode);
+        if (result && typeof result.probability === 'number') {
+          return {
+            isSpeech: result.isSpeech,
+            probability: result.probability,
+          };
+        }
+      }
+    } catch (err) {
+      logger.warn('WebRtcVadAdapter', 'Rust core evalVad failed, falling back to RMS', err);
+    }
 
     // Fallback implementation using frame energy and dynamic SNR thresholds
     const { normalized } = calculateRms(frameBytes);

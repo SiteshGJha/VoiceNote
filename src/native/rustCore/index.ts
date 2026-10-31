@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import { IRustCoreHybridObject } from './types';
 import { trimSilence } from '@/audio/silenceTrim';
-import { wrapPcmWithWavHeader } from '@/audio/wavUtils';
+import { calculateRms, wrapPcmWithWavHeader } from '@/audio/wavUtils';
 
 export * from './types';
 
@@ -42,6 +42,21 @@ export function getRustCore(): IRustCoreHybridObject | null {
       const wavBytes = wrapPcmWithWavHeader(trimResult.trimmedPcm);
       fs.writeFileSync(outputPath, Buffer.from(wavBytes.buffer, wavBytes.byteOffset, wavBytes.byteLength));
       return { hasSpeech: true, status: 1 };
+    },
+    evalVad: (pcm: ArrayBuffer, sensitivityMode: number = 2) => {
+      const uint8 = new Uint8Array(pcm);
+      const { normalized } = calculateRms(uint8);
+      const modeThresholds: Record<number, number> = {
+        0: 0.70,
+        1: 0.60,
+        2: 0.50,
+        3: 0.40,
+      };
+      const threshold = modeThresholds[sensitivityMode] ?? 0.50;
+      return {
+        isSpeech: normalized >= threshold,
+        probability: normalized,
+      };
     },
   };
   return cachedInstance;

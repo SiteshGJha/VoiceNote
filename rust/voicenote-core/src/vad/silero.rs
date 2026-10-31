@@ -27,11 +27,18 @@ impl std::fmt::Debug for SileroVad {
     }
 }
 
+pub const EMBEDDED_MODEL_BYTES: &[u8] = include_bytes!("../../../../assets/silero_vad.onnx");
+
 impl SileroVad {
     /// Number of audio samples per VAD evaluation frame (512 samples @ 16 kHz = 32 ms).
     pub const FRAME_SIZE: usize = 512;
     /// Supported sampling rate for Silero VAD v4.
     pub const SAMPLE_RATE: i64 = 16000;
+
+    /// Creates a new `SileroVad` instance using the embedded Silero ONNX model.
+    pub fn new_default(sensitivity: VadSensitivity) -> Result<Self, VnError> {
+        Self::new(EMBEDDED_MODEL_BYTES, sensitivity)
+    }
 
     /// Creates a new `SileroVad` instance from in-memory ONNX model bytes and a sensitivity preset.
     pub fn new(model_bytes: &[u8], sensitivity: VadSensitivity) -> Result<Self, VnError> {

@@ -8,7 +8,7 @@ pub use audio::{
 pub use errors::{VnError, VnErrorCode};
 
 use std::ffi::CString;
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_void};
 
 #[no_mangle]
 pub extern "C" fn voicenote_core_version() -> *const c_char {
@@ -108,3 +108,90 @@ pub unsafe extern "C" fn vn_audio_trim_and_save_wav(
 
     1
 }
+
+/// Creates a new VAD instance with the specified sensitivity mode (1: Low, 2: Medium, 3: High).
+/// Returns an opaque pointer to the VAD handle, or null on failure.
+#[no_mangle]
+pub unsafe extern "C" fn vn_vad_create(sensitivity_mode: u8) -> *mut c_void {
+    let sensitivity = match sensitivity_mode {
+        1 => vad::VadSensitivity::Low,
+        3 => vad::VadSensitivity::High,
+        _ => vad::VadSensitivity::Medium,
+    };
+    match vad::VadGate::new_default(sensitivity) {
+        Ok(gate) => Box::into_raw(Box::new(gate)) as *mut c_void,
+        Err(_) => {
+            let gate = vad::VadGate::new_rms(sensitivity);
+            Box::into_raw(Box::new(gate)) as *mut c_void
+        }
+    }
+}
+
+/// Frees a VAD instance previously created by `vn_vad_create`.
+///
+/// # Safety
+/// `handle` must be a pointer returned by `vn_vad_create`, or null.
+#[no_mangle]
+pub unsafe extern "C" fn vn_vad_free(handle: *mut c_void) {
+    if handle.is_null() {
+        return;
+    }
+    drop(Box::from_raw(handle as *mut vad::VadGate));
+}
+
+/// Resets the internal recurrent state of the VAD instance.
+///
+/// # Safety
+/// `handle` must be a valid pointer returned by `vn_vad_create`, or null.
+#[no_mangle]
+pub unsafe extern "C" fn vn_vad_reset(handle: *mut c_void) {
+    if handle.is_null() {
+        return;
+    }
+    let gate = &mut *(handle as *mut vad::VadGate);
+    gate.reset();
+}
+
+/// Evaluates a 16-bit PCM chunk and returns speech probability in [0.0, 1.0].
+///
+/// # Arguments
+/// * `vad_handle` - Pointer to a VAD handle created via `vn_vad_create`, or null for fallback.
+/// * `pcm_ptr` - Pointer to 16-bit signed PCM samples.
+/// * `sample_count` - Number of `i16` samples.
+/// * `sensitivity_mode` - Sensitivity preset (1: Low, 2: Medium, 3: High).
+///
+/// # Returns
+/// Speech probability in [0.0, 1.0].
+///
+/// # Safety
+/// If `pcm_ptr` is non-null, it must point to at least `sample_count` contiguous `i16` values.
+#[no_mangle]
+pub unsafe extern "C" fn vn_vad_eval_pcm_chunk(
+    vad_handle: *mut c_void,
+    pcm_ptr: *const i16,
+    sample_count: usize,
+    sensitivity_mode: u8,
+) -> f32 {
+    if pcm_ptr.is_null() || sample_count == 0 {
+        return 0.0;
+    }
+
+    let pcm = std::slice::from_raw_parts(pcm_ptr, sample_count);
+    let sensitivity = match sensitivity_mode {
+        1 => vad::VadSensitivity::Low,
+        3 => vad::VadSensitivity::High,
+        _ => vad::VadSensitivity::Medium,
+    };
+
+    if !vad_handle.is_null() {
+        let gate = &mut *(vad_handle as *mut vad::VadGate);
+        gate.set_sensitivity(sensitivity);
+        match gate.eval_chunk(pcm) {
+            Ok(prob) => prob,
+            Err(_) => vad::compute_rms_prob(pcm),
+        }
+    } else {
+        vad::compute_rms_prob(pcm)
+    }
+}
+

@@ -34,6 +34,11 @@
 #define WAV_HEADER_SIZE 44
 
 /**
+ * Default minimum speech duration required to transition from `Idle` to `Speech` (300 ms).
+ */
+#define VadGate_DEFAULT_MIN_SPEECH_MS 300
+
+/**
  * Number of audio samples per VAD evaluation frame (512 samples @ 16 kHz = 32 ms).
  */
 #define SileroVad_FRAME_SIZE 512
@@ -104,6 +109,48 @@ int32_t vn_audio_trim_and_save_wav(const int16_t *pcm_ptr,
                                    uintptr_t sample_count,
                                    const char *output_path,
                                    uint32_t padding_ms);
+
+/**
+ * Creates a new VAD instance with the specified sensitivity mode (1: Low, 2: Medium, 3: High).
+ * Returns an opaque pointer to the VAD handle, or null on failure.
+ */
+void *vn_vad_create(uint8_t sensitivity_mode);
+
+/**
+ * Frees a VAD instance previously created by `vn_vad_create`.
+ *
+ * # Safety
+ * `handle` must be a pointer returned by `vn_vad_create`, or null.
+ */
+void vn_vad_free(void *handle);
+
+/**
+ * Resets the internal recurrent state of the VAD instance.
+ *
+ * # Safety
+ * `handle` must be a valid pointer returned by `vn_vad_create`, or null.
+ */
+void vn_vad_reset(void *handle);
+
+/**
+ * Evaluates a 16-bit PCM chunk and returns speech probability in [0.0, 1.0].
+ *
+ * # Arguments
+ * * `vad_handle` - Pointer to a VAD handle created via `vn_vad_create`, or null for fallback.
+ * * `pcm_ptr` - Pointer to 16-bit signed PCM samples.
+ * * `sample_count` - Number of `i16` samples.
+ * * `sensitivity_mode` - Sensitivity preset (1: Low, 2: Medium, 3: High).
+ *
+ * # Returns
+ * Speech probability in [0.0, 1.0].
+ *
+ * # Safety
+ * If `pcm_ptr` is non-null, it must point to at least `sample_count` contiguous `i16` values.
+ */
+float vn_vad_eval_pcm_chunk(void *vad_handle,
+                            const int16_t *pcm_ptr,
+                            uintptr_t sample_count,
+                            uint8_t sensitivity_mode);
 
 #ifdef __cplusplus
 }  // extern "C"
