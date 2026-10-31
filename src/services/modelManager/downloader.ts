@@ -6,6 +6,7 @@ import { verifyChecksum } from './verifier';
 import { storageQuota } from './storageQuota';
 import { MlError } from '@/ml/errors';
 import { logger } from '@/utils/logger';
+import { nativeAudio } from '@/native/nativeAudio';
 
 export type ProgressCallback = (percent: number, bytesDownloaded: number, totalBytes: number) => void;
 
@@ -98,10 +99,31 @@ export class ModelDownloader {
       }
 
       // 6. Atomically move from .part to final model path
-      if (fs.existsSync(finalPath)) {
-        fs.unlinkSync(finalPath);
+      let movedNatively = false;
+      if (nativeAudio.isNativeAvailable) {
+        try {
+          movedNatively = await nativeAudio.moveFile(partPath, finalPath);
+        } catch (err) {
+          logger.warn('ModelDownloader', 'Native moveFile failed, falling back to fs', err);
+        }
       }
-      fs.renameSync(partPath, finalPath);
+
+      if (!movedNatively) {
+        if (typeof fs.renameSync === 'function') {
+          if (fs.existsSync(finalPath)) {
+            fs.unlinkSync(finalPath);
+          }
+          fs.renameSync(partPath, finalPath);
+        } else if (typeof fs.copyFileSync === 'function') {
+          if (fs.existsSync(finalPath)) {
+            fs.unlinkSync(finalPath);
+          }
+          fs.copyFileSync(partPath, finalPath);
+          if (fs.existsSync(partPath)) {
+            fs.unlinkSync(partPath);
+          }
+        }
+      }
       logger.info('ModelDownloader', `Model successfully installed to ${finalPath}`);
 
       return finalPath;
@@ -142,8 +164,51 @@ export class ModelDownloader {
     resumeByte: number,
     onProgress?: ProgressCallback
   ): Promise<void> {
+    // 1. Native accelerated background download directly to disk (macOS / iOS)
+    if (nativeAudio.isNativeAvailable && !this.mockPayloadGenerator && process.env.NODE_ENV !== 'test') {
+      let progress = 5;
+      onProgress?.(progress, Math.floor(spec.sizeBytes * 0.05), spec.sizeBytes);
+
+      const progressTimer = setInterval(() => {
+        if (!this.activeDownloads.has(spec.id)) {
+          clearInterval(progressTimer);
+          return;
+        }
+        progress = Math.min(progress + 10, 95);
+        onProgress?.(progress, Math.floor(spec.sizeBytes * (progress / 100)), spec.sizeBytes);
+      }, 1000);
+
+      try {
+        const success = await nativeAudio.downloadFile(spec.url, targetPartPath);
+        clearInterval(progressTimer);
+        if (!success) {
+          throw new Error(`Native download failed for model: ${spec.id}`);
+        }
+        onProgress?.(100, spec.sizeBytes, spec.sizeBytes);
+        return;
+      } catch (err) {
+        clearInterval(progressTimer);
+        throw err;
+      }
+    }
+
+    // 2. Real HTTPS fetch download for environments without native audio bridge
+    if (!this.mockPayloadGenerator && process.env.NODE_ENV !== 'test' && typeof fetch !== 'undefined') {
+      onProgress?.(10, Math.floor(spec.sizeBytes * 0.1), spec.sizeBytes);
+      const resp = await fetch(spec.url);
+      if (!resp.ok) {
+        throw new Error(`Download failed with HTTP status ${resp.status}: ${spec.url}`);
+      }
+      onProgress?.(50, Math.floor(spec.sizeBytes * 0.5), spec.sizeBytes);
+      const arrayBuf = await resp.arrayBuffer();
+      onProgress?.(90, Math.floor(spec.sizeBytes * 0.9), spec.sizeBytes);
+      fs.writeFileSync(targetPartPath, Buffer.from(arrayBuf));
+      onProgress?.(100, spec.sizeBytes, spec.sizeBytes);
+      return;
+    }
+
+    // 3. Automated test runner simulation (fast, 100% offline, predictable for Jest tests)
     return new Promise((resolve, reject) => {
-      // In tests / mock mode, generate payload (with mock generator if configured)
       let currentBytes = resumeByte;
       const totalBytes = spec.sizeBytes;
       const chunkSize = Math.max(Math.floor(totalBytes / 4), 1024);

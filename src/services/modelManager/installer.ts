@@ -29,11 +29,12 @@ class ModelInstallerService {
       logger.warn('ModelInstaller', 'Could not create models directory on startup', err);
     }
 
-    // 2. Load persisted manifest if present
+    // 2. Load persisted manifest if present, pruning phantom entries whose files do not exist
     if (fs.existsSync(this.manifestPath)) {
       try {
         const raw = fs.readFileSync(this.manifestPath, 'utf8');
         const list: InstalledModel[] = JSON.parse(raw);
+        let prunedAny = false;
         for (const item of list) {
           if (fs.existsSync(item.localPath)) {
             this.installedModels.set(item.id, item);
@@ -42,43 +43,64 @@ class ModelInstallerService {
             } else if (item.kind === 'slm') {
               slmModelRegistry.registerInstalledModel(item.id, item.localPath);
             }
+          } else {
+            prunedAny = true;
+            logger.info('ModelInstaller', `Pruned phantom installed model ${item.id}: file not found at ${item.localPath}`);
           }
+        }
+        if (prunedAny) {
+          this.persistManifest();
         }
       } catch (err) {
         logger.warn('ModelInstaller', 'Failed to read installed models manifest', err);
       }
     }
 
-    // 3. In testing/initial state: seed default installed base ASR model if not already set
-    const baseSpec = getModelSpec('whisper-base-multilingual');
-    if (baseSpec && !this.installedModels.has(baseSpec.id)) {
-      const defaultPath = path.join(this.modelsDir, 'asr', `${baseSpec.id}.gguf`);
-      this.installedModels.set(baseSpec.id, {
-        id: baseSpec.id,
-        kind: baseSpec.kind,
-        displayName: baseSpec.displayName,
-        sizeBytes: baseSpec.sizeBytes,
-        version: baseSpec.version,
-        localPath: defaultPath,
-        installedAt: new Date().toISOString(),
-      });
-      asrModelRegistry.registerInstalledModel(baseSpec.id, defaultPath);
-    }
+    // 3. In automated test environment only: seed mock test models so test fixtures have fixture data
+    if (process.env.NODE_ENV === 'test') {
+      const baseSpec = getModelSpec('whisper-base-multilingual');
+      if (baseSpec && !this.installedModels.has(baseSpec.id)) {
+        const asrDir = path.join(this.modelsDir, 'asr');
+        if (!fs.existsSync(asrDir)) {
+          fs.mkdirSync(asrDir, { recursive: true });
+        }
+        const defaultPath = path.join(asrDir, `${baseSpec.id}.gguf`);
+        if (!fs.existsSync(defaultPath)) {
+          fs.writeFileSync(defaultPath, Buffer.from(`TEST_MODEL_${baseSpec.id}`));
+        }
+        this.installedModels.set(baseSpec.id, {
+          id: baseSpec.id,
+          kind: baseSpec.kind,
+          displayName: baseSpec.displayName,
+          sizeBytes: baseSpec.sizeBytes,
+          version: baseSpec.version,
+          localPath: defaultPath,
+          installedAt: new Date().toISOString(),
+        });
+        asrModelRegistry.registerInstalledModel(baseSpec.id, defaultPath);
+      }
 
-    // 4. Seed default installed SLM model if not already set
-    const defaultSlmSpec = getModelSpec('qwen2.5-0.5b-instruct');
-    if (defaultSlmSpec && !this.installedModels.has(defaultSlmSpec.id)) {
-      const defaultSlmPath = path.join(this.modelsDir, 'slm', `${defaultSlmSpec.id}-${defaultSlmSpec.quant}.gguf`);
-      this.installedModels.set(defaultSlmSpec.id, {
-        id: defaultSlmSpec.id,
-        kind: defaultSlmSpec.kind,
-        displayName: defaultSlmSpec.displayName,
-        sizeBytes: defaultSlmSpec.sizeBytes,
-        version: defaultSlmSpec.version,
-        localPath: defaultSlmPath,
-        installedAt: new Date().toISOString(),
-      });
-      slmModelRegistry.registerInstalledModel(defaultSlmSpec.id, defaultSlmPath);
+      const defaultSlmSpec = getModelSpec('qwen2.5-0.5b-instruct');
+      if (defaultSlmSpec && !this.installedModels.has(defaultSlmSpec.id)) {
+        const slmDir = path.join(this.modelsDir, 'slm');
+        if (!fs.existsSync(slmDir)) {
+          fs.mkdirSync(slmDir, { recursive: true });
+        }
+        const defaultSlmPath = path.join(slmDir, `${defaultSlmSpec.id}-${defaultSlmSpec.quant}.gguf`);
+        if (!fs.existsSync(defaultSlmPath)) {
+          fs.writeFileSync(defaultSlmPath, Buffer.from(`TEST_MODEL_${defaultSlmSpec.id}`));
+        }
+        this.installedModels.set(defaultSlmSpec.id, {
+          id: defaultSlmSpec.id,
+          kind: defaultSlmSpec.kind,
+          displayName: defaultSlmSpec.displayName,
+          sizeBytes: defaultSlmSpec.sizeBytes,
+          version: defaultSlmSpec.version,
+          localPath: defaultSlmPath,
+          installedAt: new Date().toISOString(),
+        });
+        slmModelRegistry.registerInstalledModel(defaultSlmSpec.id, defaultSlmPath);
+      }
     }
   }
 

@@ -71,12 +71,21 @@ function createWriteStream(filePath) {
   return stream;
 }
 
+function renameSync(oldPath, newPath) {
+  if (memFiles.has(oldPath)) {
+    const content = memFiles.get(oldPath);
+    memFiles.delete(oldPath);
+    memFiles.set(newPath, content);
+  }
+}
+
 module.exports = {
   existsSync,
   mkdirSync,
   writeFileSync,
   unlinkSync,
   copyFileSync,
+  renameSync,
   statSync,
   readFileSync,
   createReadStream,

@@ -7,7 +7,6 @@ import {
   StyleSheet,
   SafeAreaView,
   Alert,
-  Modal,
   Share,
   ActivityIndicator,
 } from 'react-native';
@@ -238,69 +237,84 @@ export const HistoryScreen: React.FC = () => {
         </>
       )}
 
-      {/* Detail Modal */}
-      <Modal visible={selectedRecord !== null} animationType="slide" transparent>
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, { backgroundColor: theme.surface }]}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>Note Detail</Text>
-              <TouchableOpacity onPress={() => setSelectedRecord(null)}>
-                <Text style={[styles.closeButtonText, { color: theme.textMuted }]}>✕</Text>
-              </TouchableOpacity>
-            </View>
+      {/* Detail Overlay Modal (Cross-platform, safe on macOS) */}
+      {selectedRecord !== null && (
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setSelectedRecord(null)}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss note details"
+          />
+          <View style={styles.modalBackdrop} pointerEvents="box-none">
+            <View style={[styles.modalCard, { backgroundColor: theme.surface }]}>
+              <View style={styles.modalHeader}>
+                <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>Note Detail</Text>
+                <TouchableOpacity
+                  onPress={() => setSelectedRecord(null)}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close note detail"
+                >
+                  <Text style={[styles.closeButtonText, { color: theme.textMuted }]}>✕</Text>
+                </TouchableOpacity>
+              </View>
 
-            {selectedRecord && (
-              <>
-                <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>Rewritten Text</Text>
-                <Text style={[styles.detailText, { color: theme.textPrimary }]}>
-                  {selectedRecord.finalText}
-                </Text>
-
-                <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>Raw Transcript</Text>
-                <Text style={[styles.detailTextRaw, { color: theme.textSecondary }]}>
-                  {selectedRecord.rawText}
-                </Text>
-
-                {copiedToast && (
-                  <Text style={[styles.copiedNotice, { color: theme.primary }]}>
-                    ✓ Copied to clipboard
+              {selectedRecord && (
+                <>
+                  <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>Rewritten Text</Text>
+                  <Text style={[styles.detailText, { color: theme.textPrimary }]}>
+                    {selectedRecord.finalText}
                   </Text>
-                )}
 
-                <View style={styles.modalActionRow}>
-                  <TouchableOpacity
-                    style={[styles.modalButton, { backgroundColor: theme.primary }]}
-                    onPress={() => handleCopy(selectedRecord.finalText)}
-                    accessible={true}
-                    accessibilityRole="button"
-                    accessibilityLabel="Copy rewritten text"
-                  >
-                    <Text style={styles.modalButtonText}>Copy</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modalButton, { backgroundColor: theme.accent }]}
-                    onPress={() => handleShare(selectedRecord.finalText)}
-                    accessible={true}
-                    accessibilityRole="button"
-                    accessibilityLabel="Share note"
-                  >
-                    <Text style={styles.modalButtonText}>Share</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modalButton, { backgroundColor: theme.dangerSurface }]}
-                    onPress={() => handleDeleteItem(selectedRecord.id)}
-                    accessible={true}
-                    accessibilityRole="button"
-                    accessibilityLabel="Delete note"
-                  >
-                    <Text style={[styles.modalButtonText, { color: theme.danger }]}>Delete</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
+                  <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>Raw Transcript</Text>
+                  <Text style={[styles.detailTextRaw, { color: theme.textSecondary }]}>
+                    {selectedRecord.rawText}
+                  </Text>
+
+                  {copiedToast && (
+                    <Text style={[styles.copiedNotice, { color: theme.primary }]}>
+                      ✓ Copied to clipboard
+                    </Text>
+                  )}
+
+                  <View style={styles.modalActionRow}>
+                    <TouchableOpacity
+                      style={[styles.modalButton, { backgroundColor: theme.primary }]}
+                      onPress={() => handleCopy(selectedRecord.finalText)}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Copy rewritten text"
+                    >
+                      <Text style={styles.modalButtonText}>Copy</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.modalButton, { backgroundColor: theme.accent }]}
+                      onPress={() => handleShare(selectedRecord.finalText)}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Share note"
+                    >
+                      <Text style={styles.modalButtonText}>Share</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.modalButton, { backgroundColor: theme.dangerSurface }]}
+                      onPress={() => handleDeleteItem(selectedRecord.id)}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Delete note"
+                    >
+                      <Text style={[styles.modalButtonText, { color: theme.danger }]}>Delete</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </View>
           </View>
         </View>
-      </Modal>
+      )}
     </SafeAreaView>
   );
 };
@@ -375,9 +389,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
+  modalOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    zIndex: 1000,
+    elevation: 10,
+  },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
   modalCard: {

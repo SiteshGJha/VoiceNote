@@ -1,11 +1,24 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import { logger } from '@/utils/logger';
+import { nativeAudio } from '@/native/nativeAudio';
 
 /**
  * Computes SHA-256 checksum of a local file.
  */
 export async function verifyChecksum(filePath: string, expectedSha256: string): Promise<boolean> {
+  // Use native accelerated CommonCrypto on device if available
+  if (nativeAudio.isNativeAvailable) {
+    try {
+      const nativeResult = await nativeAudio.verifyFileChecksum(filePath, expectedSha256);
+      if (typeof nativeResult === 'boolean') {
+        return nativeResult;
+      }
+    } catch (err) {
+      logger.warn('ModelVerifier', 'Native checksum verification failed, falling back to JS stream', err);
+    }
+  }
+
   return new Promise<boolean>((resolve) => {
     if (!fs.existsSync(filePath)) {
       logger.error('ModelVerifier', `File does not exist for verification: ${filePath}`);

@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useSettingsStore } from '@/state/useSettingsStore';
 import { lightTheme, darkTheme } from '@/utils/theme';
+import { BrandIcon } from './BrandIcon';
 
 interface HeaderProps {
   title: string;
@@ -37,6 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
             <Text style={[styles.backText, { color: theme.primary }]}>←</Text>
           </TouchableOpacity>
         )}
+        <BrandIcon size={26} />
         <View>
           <Text style={[styles.title, { color: theme.textPrimary }]}>{title}</Text>
           {subtitle && (

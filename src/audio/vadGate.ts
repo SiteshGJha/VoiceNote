@@ -17,6 +17,7 @@ export class VadGate {
   private config: VadConfig;
   private state: VadState = 'idle';
   private speechDetected = false;
+  private autoStopFired = false;
   private consecutiveSpeechMs = 0;
   private consecutiveSilenceMs = 0;
   private totalProcessedMs = 0;
@@ -37,6 +38,7 @@ export class VadGate {
   public reset(): void {
     this.state = 'idle';
     this.speechDetected = false;
+    this.autoStopFired = false;
     this.consecutiveSpeechMs = 0;
     this.consecutiveSilenceMs = 0;
     this.totalProcessedMs = 0;
@@ -48,6 +50,10 @@ export class VadGate {
 
   public hasDetectedSpeech(): boolean {
     return this.speechDetected;
+  }
+
+  public hasAutoStopped(): boolean {
+    return this.autoStopFired;
   }
 
   /**
@@ -91,7 +97,12 @@ export class VadGate {
       }
 
       // If speech was previously active and silence window exceeded, trigger auto-stop
-      if (this.speechDetected && this.consecutiveSilenceMs >= this.config.silenceWindowMs) {
+      if (
+        !this.autoStopFired &&
+        this.speechDetected &&
+        this.consecutiveSilenceMs >= this.config.silenceWindowMs
+      ) {
+        this.autoStopFired = true;
         logger.info(
           'VadGate',
           `Auto-stop triggered after ${this.consecutiveSilenceMs}ms silence (threshold: ${this.config.silenceWindowMs}ms)`

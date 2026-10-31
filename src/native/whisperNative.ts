@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import { MlError } from '@/ml/errors';
 import { DetectedLang } from '@/ml/types';
 import { logger } from '@/utils/logger';
+import { nativeAudio } from './nativeAudio';
 
 export const ASR_TIMEOUT_MS = 30_000; // 30s timeout per 02-on-device-ml-safety.md
 export const SESSION_IDLE_UNLOAD_MS = 5 * 60 * 1000; // 5 min idle auto-unload
@@ -126,6 +127,26 @@ export class WhisperNativeBridge {
         if (this.mockInferenceHook) {
           const result = this.mockInferenceHook(opts);
           resolve(result);
+          return;
+        }
+
+        if (nativeAudio.isNativeAvailable) {
+          nativeAudio.transcribeAudio(opts.audioUri, opts.language)
+            .then((res) => {
+              if (!res || !res.text || res.text.trim().length === 0) {
+                reject(new MlError('ASR_EMPTY_OUTPUT', 'ASR returned empty transcript'));
+                return;
+              }
+              resolve({
+                text: res.text.trim(),
+                detectedLang: res.detectedLang as DetectedLang,
+                durationMs: res.durationMs,
+              });
+            })
+            .catch((err) => {
+              logger.error('WhisperNative', 'Native ASR failed', err);
+              reject(new MlError('ASR_TIMEOUT', `Native ASR failed: ${err instanceof Error ? err.message : String(err)}`));
+            });
           return;
         }
 

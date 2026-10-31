@@ -86,3 +86,4 @@ ios/**/*.mobileprovision
 # Antigravity / Gemini scratch
 .gemini/
 scratch/
+.worktrees/

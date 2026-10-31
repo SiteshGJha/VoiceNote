@@ -45,5 +45,7 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VoiceNote requires microphone access to record and transcribe speech on your Mac.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>VoiceNote requires speech recognition to transcribe your voice notes offline on your device.</string>
 </dict>
 </plist>

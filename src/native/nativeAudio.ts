@@ -22,7 +22,7 @@ export interface NativeAudioMeteringEvent {
   peak: number;
 }
 
-const { VoiceNoteNativeAudio } = NativeModules;
+const VoiceNoteNativeAudio = NativeModules?.VoiceNoteNativeAudio;
 
 export class NativeAudioBridge {
   private eventEmitter: NativeEventEmitter | null = null;
@@ -69,6 +69,27 @@ export class NativeAudioBridge {
       return null;
     }
     return VoiceNoteNativeAudio.transcribeAudio(filePath, language ?? 'en');
+  }
+
+  public async downloadFile(url: string, targetPath: string): Promise<boolean> {
+    if (!this.isAvailable || typeof VoiceNoteNativeAudio.downloadFile !== 'function') {
+      return false;
+    }
+    return VoiceNoteNativeAudio.downloadFile(url, targetPath);
+  }
+
+  public async verifyFileChecksum(filePath: string, expectedSha256: string): Promise<boolean> {
+    if (!this.isAvailable || typeof VoiceNoteNativeAudio.verifyFileChecksum !== 'function') {
+      return false;
+    }
+    return VoiceNoteNativeAudio.verifyFileChecksum(filePath, expectedSha256);
+  }
+
+  public async moveFile(sourcePath: string, targetPath: string): Promise<boolean> {
+    if (!this.isAvailable || typeof VoiceNoteNativeAudio.moveFile !== 'function') {
+      return false;
+    }
+    return VoiceNoteNativeAudio.moveFile(sourcePath, targetPath);
   }
 
   public addMeteringListener(listener: (event: NativeAudioMeteringEvent) => void): () => void {
