@@ -9,6 +9,7 @@
     "ios": "react-native run-ios",
     "macos": "react-native run-macos",
     "start:macos": "react-native start",
+    "bundle:macos": "react-native bundle --platform macos --dev false --entry-file index.js --bundle-output macos/voicenote-macOS/main.jsbundle --assets-dest macos/voicenote-macOS",
     "test": "jest --passWithNoTests --watchman=false --forceExit",
     "test:coverage": "jest --coverage",
     "lint": "eslint src/ --ext .ts,.tsx",
