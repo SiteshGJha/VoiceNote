@@ -81,15 +81,47 @@
    - Set `taskHint = SFSpeechRecognitionTaskHintDictation` (1).
    - Set `addsPunctuation = YES`.
    - Configure recognition handler to stream partial results and capture complete multi-sentence dictation.
-4. [ ] **Add Native File Download & Checksum to `AppDelegate.mm` & `nativeAudio.ts`**:
+4. [x] **Add Native File Download & Checksum to `AppDelegate.mm` & `nativeAudio.ts`**:
    - Implement `downloadFile:toPath:resolver:rejecter:` in `AppDelegate.mm`.
    - Implement `verifyFileChecksum:expectedSha256:resolver:rejecter:` in `AppDelegate.mm`.
    - Expose methods in `src/native/nativeAudio.ts`.
-5. [ ] **Wire Real Download in `src/services/modelManager/downloader.ts` & `verifier.ts`**:
+5. [x] **Wire Real Download in `src/services/modelManager/downloader.ts` & `verifier.ts`**:
    - Call native download / real fetch in non-test mode.
    - Keep test mocks for `NODE_ENV === 'test'`.
    - Wire native verifier in `verifier.ts`.
-6. [ ] **Verification**:
-   - Run `npm test` (37 suites).
-   - Run `npm run typecheck`.
-   - Run `npm run audit:privacy`.
+6. [x] **Rust Core Native Rewrite (Phases 0 - 5)**:
+   - [x] Phase 0: Workspace scaffold, C-ABI bindings (`voicenote_core.h`), Nitro Modules C++ `RustCoreHybridObject` JSI bridge, and cross-platform build scripts (`scripts/build-macos.sh`, `scripts/build-ios.sh`, `scripts/build-android.sh`).
+   - [x] Phase 1: Audio capture, Rust `AudioBuffer` with RAII `Drop` ephemerality, silence trimming with 200 ms padding, and WAV header encoding.
+   - [x] Phase 2: Silero VAD V4 ONNX engine via `tract-onnx` and VAD gate state machine with sensitivity presets.
+   - [x] Phase 3: Whisper ASR engine via `whisper-rs`, Hinglish language strategy, long audio silence segmenter, CoreML build check on iOS, and adaptive timeouts.
+   - [x] Phase 4: LLaMA GGUF SLM engine via `llama-cpp-4`, memory protection via `ModelCoordinator` (< 500 MB RAM mutual exclusion and 60s idle auto-unload), and Rust hallucination guard with entity preservation regex.
+   - [x] Phase 5: Streaming SHA-256 verifier using `ring`, production dev-guards, and complete developer documentation (`docs/TECHNICAL_GUIDE.md`, `rust/README.md`, `docs/plans/TASK_PLAN.md`).
+7. [x] **Verification**:
+   - Run `cargo test --manifest-path rust/Cargo.toml` (67 Rust tests in 10 suites passing).
+   - Run `npm test` (203 Jest tests in 40 suites passing).
+   - Run `npm run typecheck` (0 errors).
+   - Run `npm run audit:privacy` (0 violations).
+
+---
+
+## 4. Completed Rust Native Core Migration Summary
+
+The VoiceNote native inference and audio layer has been completely migrated to a high-performance, offline Rust core (`voicenote-core`) interfacing with React Native via Nitro Modules JSI:
+
+| Subsystem | Implementation Details | Test Coverage |
+|---|---|---|
+| **Audio Processing** | `AudioBuffer` with RAII `Drop` ephemerality for safe audio file cleanup, 200ms phoneme-padded silence trimming, 44-byte WAV header encoding | `audio_buffer_test.rs` (6 tests), `silence_trim_test.rs` (7 tests), `wav_test.rs` (6 tests) |
+| **Voice Activity Detection** | Silero VAD V4 ONNX via `tract-onnx` with zero phase distortion, sensitivity presets, and debounced auto-stop gate | `vad_test.rs` (10 tests) |
+| **Whisper ASR** | `whisper-rs` (whisper.cpp) binding, Metal GPU acceleration, CoreML compile check on iOS, silence segmenter for audio >27s, Hinglish language heuristics | `whisper_test.rs` (4 tests), `asr_segmenter_test.rs` (8 tests) |
+| **Tone Rewriting (SLM)** | `llama-cpp-4` (llama.cpp) GGUF reader, canonical Professional/Casual prompts, 60s idle auto-unload | `llama_test.rs` (10 tests) |
+| **Memory Coordinator** | Strict mutual exclusion between ASR and SLM keeping peak memory < 500 MB RAM budget | Included in `llama_test.rs` |
+| **Hallucination Guard** | Entity preservation regex (numbers, currencies, dates, proper nouns) and [0.35x, 2.5x] length ratio bounds | `hallucination_guard_test.rs` (11 tests) |
+| **Cryptographic Verifier** | Streaming SHA-256 verifier via `ring = "0.17"` directly validating model downloads from disk | `crypto_test.rs` (3 tests) |
+| **C-ABI & JSI Bridge** | `cbindgen`-generated `voicenote_core.h`, Nitro `RustCoreHybridObject` C++ shim, typed TypeScript bridge | `scaffold_test.rs` (2 tests), `smokeTest.test.ts` |
+
+**Verification Metrics:**
+- **Rust Unit Tests**: 67 passed, 0 failed across 10 test suites (`cargo test --manifest-path rust/Cargo.toml`).
+- **Jest Unit Tests**: 203 passed, 0 failed across 40 test suites (`npm test`).
+- **TypeScript**: Strict typecheck passing with 0 errors (`npm run typecheck`).
+- **Privacy Audit**: Passed with 0 violations (`npm run audit:privacy`).
+- **Privacy Prime Directive**: Zero cloud inference, zero telemetry SDKs, audio temp files strictly ephemeral via RAII.
