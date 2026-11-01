@@ -24,6 +24,11 @@ struct AsrNativeResult {
   double durationMs;
 };
 
+struct SlmNativeResult {
+  std::string text;
+  double durationMs;
+};
+
 class RustCoreHybridObject : public margelo::nitro::HybridObject {
 public:
   RustCoreHybridObject();
@@ -43,6 +48,14 @@ public:
     const std::string& modelPath,
     std::optional<std::string> language,
     std::optional<std::string> prompt,
+    std::optional<double> timeoutMs
+  );
+  SlmNativeResult generate(
+    const std::string& prompt,
+    const std::string& modelPath,
+    std::optional<double> temperature,
+    std::optional<double> topP,
+    std::optional<double> maxTokens,
     std::optional<double> timeoutMs
   );
   void loadHybridMethods() override;

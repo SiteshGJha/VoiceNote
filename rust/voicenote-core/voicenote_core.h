@@ -106,6 +106,24 @@ typedef struct VnAsrResponse {
   uint64_t duration_ms;
 } VnAsrResponse;
 
+/**
+ * Representation of an SLM generation / rewrite result or error across FFI boundaries.
+ */
+typedef struct VnSlmResponse {
+  /**
+   * 0 on success, negative value (`-VnErrorCode`) on error.
+   */
+  int32_t status;
+  /**
+   * Null-terminated UTF-8 rewritten text string, or null on error.
+   */
+  char *text;
+  /**
+   * Elapsed inference duration in milliseconds.
+   */
+  uint64_t duration_ms;
+} VnSlmResponse;
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -209,6 +227,27 @@ struct VnAsrResponse *vn_asr_transcribe(const int16_t *pcm_ptr,
                                         const char *language,
                                         const char *prompt,
                                         uint64_t timeout_ms);
+
+/**
+ * Frees memory associated with a `VnSlmResponse` returned by `vn_slm_generate`.
+ *
+ * # Safety
+ * `resp` must be a pointer returned by `vn_slm_generate`, or null.
+ */
+void vn_slm_response_free(struct VnSlmResponse *resp);
+
+/**
+ * Generates tone rewriting using the on-device GGUF SLM engine.
+ *
+ * # Safety
+ * `prompt` and `model_path` must be valid, null-terminated UTF-8 C strings if non-null.
+ */
+struct VnSlmResponse *vn_slm_generate(const char *prompt,
+                                      const char *model_path,
+                                      float temperature,
+                                      float top_p,
+                                      uint32_t max_tokens,
+                                      uint64_t timeout_ms);
 
 #ifdef __cplusplus
 }  // extern "C"

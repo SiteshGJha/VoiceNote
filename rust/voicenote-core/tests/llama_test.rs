@@ -1,9 +1,11 @@
+use std::ffi::CString;
 use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 use voicenote_core::errors::VnErrorCode;
 use voicenote_core::model_coordinator::{ActiveModel, ModelCoordinator};
 use voicenote_core::slm::llama::LlamaEngine;
+use voicenote_core::{vn_slm_generate, vn_slm_response_free};
 
 #[tokio::test]
 async fn corrupt_or_missing_gguf_fails_cleanly_without_segfault() {
@@ -172,4 +174,106 @@ async fn llama_engine_generate_produces_rewrite() {
     assert!(!output.contains("um"));
     assert!(!output.contains("like"));
     assert!(output.contains("meet tomorrow"));
+}
+
+#[test]
+fn test_vn_slm_generate_null_prompt_returns_error() {
+    let model_path = CString::new("/tmp/some_model.gguf").unwrap();
+    let resp = unsafe {
+        vn_slm_generate(
+            std::ptr::null(),
+            model_path.as_ptr(),
+            0.7,
+            0.9,
+            128,
+            1000,
+        )
+    };
+    assert!(!resp.is_null());
+    unsafe {
+        assert!((*resp).status < 0);
+        assert!((*resp).text.is_null());
+        vn_slm_response_free(resp);
+    }
+}
+
+#[test]
+fn test_vn_slm_generate_null_model_path_returns_model_missing() {
+    let prompt = CString::new("Input: hello\nOutput:").unwrap();
+    let resp = unsafe {
+        vn_slm_generate(
+            prompt.as_ptr(),
+            std::ptr::null(),
+            0.7,
+            0.9,
+            128,
+            1000,
+        )
+    };
+    assert!(!resp.is_null());
+    unsafe {
+        assert_eq!((*resp).status, -(VnErrorCode::AsrModelMissing as i32));
+        assert!((*resp).text.is_null());
+        vn_slm_response_free(resp);
+    }
+}
+
+#[test]
+fn test_vn_slm_generate_missing_model_file_returns_model_missing() {
+    let prompt = CString::new("Input: hello\nOutput:").unwrap();
+    let model_path = CString::new("/tmp/missing_file_xyz_123.gguf").unwrap();
+    let resp = unsafe {
+        vn_slm_generate(
+            prompt.as_ptr(),
+            model_path.as_ptr(),
+            0.7,
+            0.9,
+            128,
+            1000,
+        )
+    };
+    assert!(!resp.is_null());
+    unsafe {
+        assert_eq!((*resp).status, -(VnErrorCode::AsrModelMissing as i32));
+        assert!((*resp).text.is_null());
+        vn_slm_response_free(resp);
+    }
+}
+
+#[test]
+fn test_vn_slm_generate_valid_model_rewrites_text() {
+    let valid_path = Path::new("/tmp/valid_slm_c_abi_model.gguf");
+    {
+        let mut f = std::fs::File::create(valid_path).unwrap();
+        f.write_all(b"GGUF").unwrap();
+        f.write_all(&3u32.to_le_bytes()).unwrap();
+        f.write_all(&0u64.to_le_bytes()).unwrap();
+        f.write_all(&0u64.to_le_bytes()).unwrap();
+        f.flush().unwrap();
+    }
+
+    let prompt = CString::new("Instruction: Rewrite in professional tone.\nInput: um yeah we should like meet tomorrow\nOutput:").unwrap();
+    let model_path = CString::new(valid_path.to_str().unwrap()).unwrap();
+    let resp = unsafe {
+        vn_slm_generate(
+            prompt.as_ptr(),
+            model_path.as_ptr(),
+            0.7,
+            0.9,
+            128,
+            5000,
+        )
+    };
+    let _ = std::fs::remove_file(valid_path);
+
+    assert!(!resp.is_null());
+    unsafe {
+        assert_eq!((*resp).status, 0);
+        assert!(!(*resp).text.is_null());
+        let text_c = std::ffi::CStr::from_ptr((*resp).text).to_str().unwrap();
+        assert!(!text_c.contains("um"));
+        assert!(!text_c.contains("like"));
+        assert!(text_c.contains("meet tomorrow"));
+        vn_slm_response_free(resp);
+    }
 }

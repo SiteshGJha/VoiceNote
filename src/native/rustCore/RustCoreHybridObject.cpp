@@ -71,6 +71,28 @@ struct JSIConverter<voicenote::AsrNativeResult> final {
     return obj.hasProperty(runtime, "text") && obj.hasProperty(runtime, "detectedLang") && obj.hasProperty(runtime, "durationMs");
   }
 };
+
+template <>
+struct JSIConverter<voicenote::SlmNativeResult> final {
+  static inline voicenote::SlmNativeResult fromJSI(jsi::Runtime& runtime, const jsi::Value& arg) {
+    jsi::Object obj = arg.asObject(runtime);
+    return voicenote::SlmNativeResult {
+      obj.getProperty(runtime, "text").asString(runtime).utf8(runtime),
+      obj.getProperty(runtime, "durationMs").asNumber()
+    };
+  }
+  static inline jsi::Value toJSI(jsi::Runtime& runtime, const voicenote::SlmNativeResult& result) {
+    jsi::Object obj(runtime);
+    obj.setProperty(runtime, "text", jsi::String::createFromUtf8(runtime, result.text));
+    obj.setProperty(runtime, "durationMs", jsi::Value(result.durationMs));
+    return obj;
+  }
+  static inline bool canConvert(jsi::Runtime& runtime, const jsi::Value& value) {
+    if (!value.isObject()) return false;
+    jsi::Object obj = value.getObject(runtime);
+    return obj.hasProperty(runtime, "text") && obj.hasProperty(runtime, "durationMs");
+  }
+};
 } // namespace margelo::nitro
 
 namespace voicenote {
@@ -202,6 +224,63 @@ AsrNativeResult RustCoreHybridObject::transcribe(
   return AsrNativeResult { text, detectedLang, duration };
 }
 
+SlmNativeResult RustCoreHybridObject::generate(
+  const std::string& prompt,
+  const std::string& modelPath,
+  std::optional<double> temperature,
+  std::optional<double> topP,
+  std::optional<double> maxTokens,
+  std::optional<double> timeoutMs
+) {
+  float temp = (temperature.has_value() && temperature.value() >= 0) ? static_cast<float>(temperature.value()) : 0.7f;
+  float p = (topP.has_value() && topP.value() >= 0) ? static_cast<float>(topP.value()) : 0.9f;
+  uint32_t tokens = (maxTokens.has_value() && maxTokens.value() > 0) ? static_cast<uint32_t>(maxTokens.value()) : 512;
+  uint64_t timeout = (timeoutMs.has_value() && timeoutMs.value() > 0) ? static_cast<uint64_t>(timeoutMs.value()) : 10000;
+
+  VnSlmResponse* resp = vn_slm_generate(
+    prompt.c_str(),
+    modelPath.c_str(),
+    temp,
+    p,
+    tokens,
+    timeout
+  );
+
+  if (!resp) {
+    throw std::runtime_error("UNKNOWN: vn_slm_generate returned null");
+  }
+
+  int32_t status = resp->status;
+  if (status < 0) {
+    int32_t code = -status;
+    std::string errCodeStr = "UNKNOWN";
+    switch (code) {
+      case AsrEmptyOutput: errCodeStr = "ASR_EMPTY_OUTPUT"; break;
+      case AsrTimeout: errCodeStr = "ASR_TIMEOUT"; break;
+      case AsrModelMissing: errCodeStr = "ASR_MODEL_MISSING"; break;
+      case SlmTimeout: errCodeStr = "SLM_TIMEOUT"; break;
+      case SlmHallucinationSuspected: errCodeStr = "SLM_HALLUCINATION_SUSPECTED"; break;
+      case ModelChecksumFailed: errCodeStr = "MODEL_CHECKSUM_FAILED"; break;
+      case AudioRecordFailed: errCodeStr = "AUDIO_RECORD_FAILED"; break;
+      case VadNoSpeech: errCodeStr = "VAD_NO_SPEECH"; break;
+      case SegmentMergeFailed: errCodeStr = "SEGMENT_MERGE_FAILED"; break;
+      case RecordingLimitReached: errCodeStr = "RECORDING_LIMIT_REACHED"; break;
+      case HardwareTriggerDenied: errCodeStr = "HARDWARE_TRIGGER_DENIED"; break;
+      case StorageFull: errCodeStr = "STORAGE_FULL"; break;
+      default: errCodeStr = "UNKNOWN"; break;
+    }
+    vn_slm_response_free(resp);
+    throw std::runtime_error(errCodeStr);
+  }
+
+  std::string text = resp->text ? resp->text : "";
+  double duration = static_cast<double>(resp->duration_ms);
+
+  vn_slm_response_free(resp);
+
+  return SlmNativeResult { text, duration };
+}
+
 void RustCoreHybridObject::loadHybridMethods() {
   HybridObject::loadHybridMethods();
   registerHybrids(this, [](Prototype& prototype) {
@@ -209,6 +288,7 @@ void RustCoreHybridObject::loadHybridMethods() {
     prototype.registerHybridMethod("trimAndSaveWav", &RustCoreHybridObject::trimAndSaveWav);
     prototype.registerHybridMethod("evalVad", &RustCoreHybridObject::evalVad);
     prototype.registerHybridMethod("transcribe", &RustCoreHybridObject::transcribe);
+    prototype.registerHybridMethod("generate", &RustCoreHybridObject::generate);
   });
 }
 } // namespace voicenote

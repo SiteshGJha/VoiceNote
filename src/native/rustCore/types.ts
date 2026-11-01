@@ -9,6 +9,11 @@ export interface AsrNativeResult {
   durationMs: number;
 }
 
+export interface SlmNativeResult {
+  text: string;
+  durationMs: number;
+}
+
 export interface IRustCoreHybridObject {
   getVersion(): string;
   trimAndSaveWav(pcm: ArrayBuffer, outputPath: string, paddingMs?: number): { hasSpeech: boolean; status: number };
@@ -20,4 +25,12 @@ export interface IRustCoreHybridObject {
     prompt?: string,
     timeoutMs?: number
   ): AsrNativeResult;
+  generate(
+    prompt: string,
+    modelPath: string,
+    temperature?: number,
+    topP?: number,
+    maxTokens?: number,
+    timeoutMs?: number
+  ): SlmNativeResult;
 }

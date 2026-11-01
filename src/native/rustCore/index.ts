@@ -75,6 +75,53 @@ function createDefaultMockInstance(): IRustCoreHybridObject {
         durationMs: 150,
       };
     },
+    generate: (
+      prompt: string,
+      modelPath: string,
+      _temperature?: number,
+      _topP?: number,
+      _maxTokens?: number,
+      _timeoutMs: number = 10000
+    ) => {
+      if (!modelPath) {
+        throw new MlError('ASR_MODEL_MISSING', 'SLM model path is missing');
+      }
+      const inputMarker = 'Input:';
+      const outputMarker = 'Output:';
+      const inputIndex = prompt.indexOf(inputMarker);
+      const outputIndex = prompt.lastIndexOf(outputMarker);
+
+      let rawInput = '';
+      if (inputIndex !== -1 && outputIndex !== -1) {
+        rawInput = prompt.slice(inputIndex + inputMarker.length, outputIndex).trim();
+      } else {
+        rawInput = prompt;
+      }
+
+      let rewritten = rawInput;
+      if (prompt.includes('professional')) {
+        rewritten = rawInput
+          .replace(/\b(um|uh|like|you know|matlab|arre)\b/gi, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (rewritten.length > 0) {
+          rewritten = rewritten.charAt(0).toUpperCase() + rewritten.slice(1);
+          if (!/[.!?]$/.test(rewritten)) {
+            rewritten += '.';
+          }
+        }
+      } else {
+        rewritten = rawInput
+          .replace(/\b(um|uh|matlab|arre)\b/gi, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
+      return {
+        text: rewritten,
+        durationMs: 150,
+      };
+    },
   };
 }
 

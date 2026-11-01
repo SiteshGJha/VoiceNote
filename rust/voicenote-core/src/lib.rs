@@ -362,3 +362,138 @@ pub unsafe extern "C" fn vn_asr_transcribe(
     }
 }
 
+/// Representation of an SLM generation / rewrite result or error across FFI boundaries.
+#[repr(C)]
+pub struct VnSlmResponse {
+    /// 0 on success, negative value (`-VnErrorCode`) on error.
+    pub status: i32,
+    /// Null-terminated UTF-8 rewritten text string, or null on error.
+    pub text: *mut c_char,
+    /// Elapsed inference duration in milliseconds.
+    pub duration_ms: u64,
+}
+
+/// Frees memory associated with a `VnSlmResponse` returned by `vn_slm_generate`.
+///
+/// # Safety
+/// `resp` must be a pointer returned by `vn_slm_generate`, or null.
+#[no_mangle]
+pub unsafe extern "C" fn vn_slm_response_free(resp: *mut VnSlmResponse) {
+    if resp.is_null() {
+        return;
+    }
+    let r = Box::from_raw(resp);
+    if !r.text.is_null() {
+        drop(CString::from_raw(r.text));
+    }
+}
+
+/// Generates tone rewriting using the on-device GGUF SLM engine.
+///
+/// # Safety
+/// `prompt` and `model_path` must be valid, null-terminated UTF-8 C strings if non-null.
+#[no_mangle]
+pub unsafe extern "C" fn vn_slm_generate(
+    prompt: *const c_char,
+    model_path: *const c_char,
+    temperature: f32,
+    top_p: f32,
+    max_tokens: u32,
+    timeout_ms: u64,
+) -> *mut VnSlmResponse {
+    if prompt.is_null() {
+        return Box::into_raw(Box::new(VnSlmResponse {
+            status: -(VnErrorCode::Unknown as i32),
+            text: std::ptr::null_mut(),
+            duration_ms: 0,
+        }));
+    }
+
+    if model_path.is_null() {
+        return Box::into_raw(Box::new(VnSlmResponse {
+            status: -(VnErrorCode::AsrModelMissing as i32),
+            text: std::ptr::null_mut(),
+            duration_ms: 0,
+        }));
+    }
+
+    let prompt_str = match std::ffi::CStr::from_ptr(prompt).to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            return Box::into_raw(Box::new(VnSlmResponse {
+                status: -(VnErrorCode::Unknown as i32),
+                text: std::ptr::null_mut(),
+                duration_ms: 0,
+            }));
+        }
+    };
+
+    let model_path_str = match std::ffi::CStr::from_ptr(model_path).to_str() {
+        Ok(s) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Box::into_raw(Box::new(VnSlmResponse {
+                status: -(VnErrorCode::AsrModelMissing as i32),
+                text: std::ptr::null_mut(),
+                duration_ms: 0,
+            }));
+        }
+    };
+
+    let timeout = if timeout_ms == 0 { 10_000 } else { timeout_ms };
+
+    let execute_generate = move || -> Result<(String, u64), VnError> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| {
+                VnError::new(
+                    VnErrorCode::Unknown,
+                    format!("Failed to create tokio runtime: {:?}", e),
+                )
+            })?;
+
+        let start = std::time::Instant::now();
+        let fut = async {
+            let engine = if model_path_str == "/mock/llama.gguf" {
+                LlamaEngine::dummy_for_testing()
+            } else {
+                LlamaEngine::load(std::path::Path::new(&model_path_str), 2048).await?
+            };
+            let output = engine
+                .generate(&prompt_str, temperature, top_p, max_tokens, timeout)
+                .await?;
+            Ok::<String, VnError>(output)
+        };
+
+        let output = rt.block_on(fut)?;
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok((output, elapsed))
+    };
+
+    let res = if tokio::runtime::Handle::try_current().is_ok() {
+        match std::thread::spawn(execute_generate).join() {
+            Ok(r) => r,
+            Err(_) => Err(VnError::new(VnErrorCode::Unknown, "Thread panic in generate")),
+        }
+    } else {
+        execute_generate()
+    };
+
+    match res {
+        Ok((output, elapsed)) => {
+            let text_c = CString::new(output).unwrap_or_else(|_| CString::new("").unwrap());
+            Box::into_raw(Box::new(VnSlmResponse {
+                status: 0,
+                text: text_c.into_raw(),
+                duration_ms: elapsed,
+            }))
+        }
+        Err(err) => Box::into_raw(Box::new(VnSlmResponse {
+            status: -(err.code() as i32),
+            text: std::ptr::null_mut(),
+            duration_ms: 0,
+        })),
+    }
+}
+
+

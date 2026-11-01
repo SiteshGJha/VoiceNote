@@ -57,7 +57,7 @@ export async function executePipeline(
       detectedLanguage = segResult.detectedLang;
     }
 
-    asrDuration = Date.now() - asrStart;
+    asrDuration = Math.max(1, Date.now() - asrStart);
     rawTranscript = mergeSegments(segmentTranscripts);
 
     // 3. Stage: Tone Rewriting (SLM)
@@ -69,7 +69,7 @@ export async function executePipeline(
       const slmResult = await rewrite(rawTranscript, options.tone, {
         lang: detectedLanguage,
       });
-      slmDuration = Date.now() - slmStart;
+      slmDuration = Math.max(1, Date.now() - slmStart);
 
       if (slmResult.status === 'ok') {
         finalRewrittenText = slmResult.final;

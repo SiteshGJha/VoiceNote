@@ -1,5 +1,6 @@
 import { MlError } from '@/ml/errors';
 import { logger } from '@/utils/logger';
+import { getRustCore } from './rustCore';
 
 export const SLM_TIMEOUT_MS = 10_000; // 10s timeout per 02-on-device-ml-safety.md
 export const SLM_IDLE_UNLOAD_MS = 60_000; // 60s idle auto-unload per 02-on-device-ml-safety.md
@@ -122,51 +123,42 @@ export class LlamaNativeBridge {
           return;
         }
 
-        // Default native simulation logic
-        const timer = setTimeout(() => {
-          const prompt = opts.prompt;
-          const inputMarker = 'Input:';
-          const outputMarker = 'Output:';
-          const inputIndex = prompt.indexOf(inputMarker);
-          const outputIndex = prompt.lastIndexOf(outputMarker);
-
-          let rawInput = '';
-          if (inputIndex !== -1 && outputIndex !== -1) {
-            rawInput = prompt.slice(inputIndex + inputMarker.length, outputIndex).trim();
-          } else {
-            rawInput = prompt;
-          }
-
-          let rewritten = rawInput;
-          if (prompt.includes('professional')) {
-            // Strip colloquial fillers
-            rewritten = rawInput
-              .replace(/\b(um|uh|like|you know|matlab|arre)\b/gi, '')
-              .replace(/\s+/g, ' ')
-              .trim();
-            if (rewritten.length > 0) {
-              rewritten = rewritten.charAt(0).toUpperCase() + rewritten.slice(1);
-              if (!/[.!?]$/.test(rewritten)) {
-                rewritten += '.';
-              }
+        const rustCore = getRustCore();
+        if (rustCore) {
+          try {
+            const res = rustCore.generate(
+              opts.prompt,
+              opts.modelPath,
+              opts.temperature,
+              opts.topP,
+              opts.maxTokens,
+              timeoutMs
+            );
+            resolve({
+              text: res.text,
+              durationMs: res.durationMs,
+            });
+            return;
+          } catch (coreErr) {
+            if (coreErr instanceof MlError) {
+              reject(coreErr);
+              return;
             }
-          } else {
-            // Casual rewrite
-            rewritten = rawInput
-              .replace(/\b(um|uh|matlab|arre)\b/gi, '')
-              .replace(/\s+/g, ' ')
-              .trim();
+            const msg = coreErr instanceof Error ? coreErr.message : String(coreErr);
+            if (msg.includes('SLM_TIMEOUT')) {
+              reject(new MlError('SLM_TIMEOUT', `SLM rewrite timed out after ${timeoutMs}ms`));
+            } else if (msg.includes('ASR_MODEL_MISSING')) {
+              reject(new MlError('ASR_MODEL_MISSING', `SLM model missing: ${opts.modelPath}`));
+            } else if (msg.includes('SLM_HALLUCINATION_SUSPECTED')) {
+              reject(new MlError('SLM_HALLUCINATION_SUSPECTED', `SLM hallucination suspected: ${msg}`));
+            } else {
+              reject(new MlError('SLM_TIMEOUT', `SLM inference failed: ${msg}`));
+            }
+            return;
           }
-
-          resolve({
-            text: rewritten,
-            durationMs: 150,
-          });
-        }, 150);
-
-        if (typeof timer.unref === 'function') {
-          timer.unref();
         }
+
+        reject(new MlError('ASR_MODEL_MISSING', 'RustCore engine is not available'));
       } catch (err) {
         reject(err);
       }
