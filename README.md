@@ -1,66 +1,112 @@
 # VoiceNote
 
 ![Offline 100%](https://img.shields.io/badge/Offline-100%25-success)
+![Rust 1.82+](https://img.shields.io/badge/Rust-1.82%2B-orange)
 ![React Native 0.76](https://img.shields.io/badge/React%20Native-0.76-blue)
 ![TypeScript Strict](https://img.shields.io/badge/TypeScript-Strict-blue)
 ![License MIT](https://img.shields.io/badge/License-MIT-green)
 
 **VoiceNote** is a fully offline, privacy-first mobile voice-memo app that transcribes speech to text on-device (English, Hindi, Hinglish) and rewrites it into chosen tones (Professional, Casual).
 
+Powered by a unified, memory-safe native Rust engine (**`voicenote-core`**) interfaced with React Native via Nitro Modules JSI, VoiceNote delivers desktop- and workstation-grade ML performance directly on mobile devices without any cloud dependencies.
+
 ## Key Features
 
-- **On-Device ASR:** Whisper-powered transcription supporting English (en), Hindi (hi), and Hinglish (code-switched).
-- **On-Device SLM Tone Rewriting:** Llama GGUF models rewrite raw transcripts into Professional or Casual tones with named entity preservation.
-- **WebRTC Voice Activity Detection:** Silence auto-stop and trimming powered by WebRTC VAD.
-- **Ephemeral Audio Handling:** Strict deletion of temporary audio files immediately post-ASR.
+- **On-Device Rust Core (`voicenote-core`):** Unified native static library delivering audio processing, VAD, ASR, SLM, and cryptographic verification on macOS, iOS, and Android.
+- **Asynchronous JSI ThreadPool:** Nitro Modules 0.18 C++ bridge (`RustCoreHybridObject`) offloads heavy inference to background threads, guaranteeing 60 fps UI responsiveness without freezing animations or waveforms.
+- **On-Device Whisper ASR:** Local speech recognition via `whisper-rs` (whisper.cpp) with Apple Silicon Metal acceleration, compile-time CoreML validation on iOS, and Hinglish script steering.
+- **Long-Audio Silence Segmentation:** Recordings longer than 27s are segmented at natural silence boundaries to prevent Whisper's 30s window cutoff.
+- **On-Device SLM Tone Rewriting:** On-device GGUF SLM engine rewriting raw transcripts into Professional or Casual tones.
+- **Hallucination Guard in Rust:** Entity preservation regex engine checking numbers, dates, times, currencies, and proper nouns with [0.35×, 2.5×] length bounds.
+- **Memory Protection & Mutual Exclusion:** `ModelCoordinator` keeps peak RAM strictly **< 500 MB** by guaranteeing Whisper and LLaMA are never concurrently resident, with a 60-second idle auto-unload timer.
+- **Silero V4 Voice Activity Detection:** Real-time ONNX VAD running via `tract-onnx` on-device with debounced state machine auto-stop (1000–2000 ms) and `resetVad()` LSTM state clearing.
+- **Audio Ephemerality (Drop RAII):** Temporary audio files written to disk are strictly deleted upon completion, cancellation, or thread abort.
+- **Streaming SHA-256 Verifier:** Zero-copy streaming file hash validation via `ring = "0.17"` verifying multi-hundred MB model weights directly from disk.
 - **Encrypted Offline Storage:** MMKV + OS Keychain AES-256 with 50-note FIFO cap and resilient in-memory fallback.
-- **Real-Time Waveform & Instant Tone Re-rewriting:** Smooth visual feedback and blazing fast rewrites.
-- **System Dark/Light Theme:** Native adaptation to system appearance.
+- **Real-Time Waveform & Theme Adaptation:** 60 fps visual audio feedback adapting seamlessly to system dark and light modes.
 
 ## Architecture & Processing Pipeline
 
 ```mermaid
 flowchart TD
-    A[Audio Capture] --> B[WebRTC VAD]
-    B --> C[Silence Trimming]
-    C --> D[Whisper ASR]
-    D --> E[Audio Temp File Deletion]
-    E --> F[Llama SLM Tone Rewrite]
-    F --> G[Encrypted MMKV History]
-    G --> H[UI Presentation]
+    subgraph UI ["React Native (TypeScript)"]
+        A[Microphone Stream] --> B[Live 60fps Waveform]
+        B --> C[Audio Recorder]
+    end
+
+    subgraph JSI ["Nitro Modules JSI Bridge (C++)"]
+        C -->|Raw PCM 16kHz| D[RustCoreHybridObject]
+        D -->|ThreadPool Worker| E[C-ABI FFI]
+    end
+
+    subgraph RustCore ["voicenote-core (Native Rust Library)"]
+        E --> F[AudioBuffer RAII Drop]
+        F --> G[Silero V4 VAD tract-onnx]
+        G --> H[Silence Trimming with Padding]
+        H --> I[Whisper ASR Engine whisper-rs]
+        I -->|Strict Audio Deletion| J[Audio Ephemerality Cleanup]
+        I --> K[ModelCoordinator Mutual Exclusion]
+        K --> L[GGUF SLM Tone Engine]
+        L --> M[Rust Hallucination Guard]
+    end
+
+    subgraph Storage ["On-Device Encrypted Storage"]
+        M --> N[MMKV + OS Keychain AES-256]
+        N --> O[Result Screen & History FIFO]
+    end
 ```
 
 ## Project Structure
 
 ```text
 VoiceNote/
-├── docs/                 # Documentation (PRD, Technical Guides, etc.)
-├── macos/                # macOS native project files
+├── docs/                 # Product specifications, technical deep-dive, and task plans
+├── rust/                 # Unified native Rust core
+│   ├── Cargo.toml        # Workspace manifest
+│   └── voicenote-core/   # Core crate (AudioBuffer, VAD, ASR, SLM, Crypto)
+├── scripts/              # Cross-compilation scripts (build-macos, build-ios, build-android)
+├── macos/                # macOS native project files & static lib destination
+├── ios/                  # iOS XCFramework destination & native project files
+├── android/              # Android JNI libraries destination & native project files
 ├── src/
 │   ├── audio/            # Audio capture & VAD utilities
-│   ├── components/       # Reusable React UI components
-│   ├── ml/               # Whisper and Llama inference wrappers
-│   ├── native/           # TurboModules, Nitro modules, JSI bindings
-│   ├── navigation/       # React Navigation setup
-│   ├── pipeline/         # Orchestration of the ASR -> SLM flow
-│   ├── screens/          # Main app screens
-│   ├── services/         # Model downloader & external integrations
+│   ├── components/       # Reusable React UI components & Waveform
+│   ├── ml/               # Whisper & Llama TypeScript orchestrator and types
+│   ├── native/           # Nitro Modules JSI bridge & RustCore hybrid object
+│   ├── navigation/       # React Navigation single native stack
+│   ├── pipeline/         # End-to-end pipeline orchestrator
+│   ├── screens/          # Home, Result, History, Models, Settings, Privacy
+│   ├── services/         # Model downloader & encrypted history service
 │   ├── state/            # Zustand stores & MMKV storage implementations
-│   └── utils/            # Helpers, formatters, logger
+│   └── utils/            # Helpers, formatters, and logger
 └── package.json
 ```
 
 ## Prerequisites & Setup
 
 - **Node.js**: >= 18
-- **macOS**: Required for desktop/iOS development.
-- **Xcode & CocoaPods**: Required for Apple targets.
-- **Android Studio**: Required for Android targets.
+- **Rust**: 1.82+ (2021 edition) with `rustup`
+- **macOS**: Required for desktop / iOS development (Apple Silicon recommended)
+- **Xcode & CocoaPods**: Required for Apple targets
+- **Android Studio & NDK**: Required for Android targets (`cargo-ndk` optional for local builds)
 
-To install dependencies:
+To install JavaScript dependencies:
 
 ```bash
 npm install
+```
+
+To build the native Rust static library:
+
+```bash
+# macOS
+bash scripts/build-macos.sh
+
+# iOS XCFramework
+bash scripts/build-ios.sh
+
+# Android (when cargo-ndk is installed)
+bash scripts/build-android.sh
 ```
 
 ## Running the App
@@ -80,27 +126,32 @@ npm install
 
 ## Verification & Quality Checks
 
-Ensure there are no regressions by running the full validation suite:
+VoiceNote enforces a strict zero-regression testing protocol:
 
-- **Tests** (all 30 test suites, 140 tests):
+- **Rust Core Test Suite** (68 unit/integration tests across 10 test suites):
+  ```bash
+  cargo test --manifest-path rust/Cargo.toml
+  ```
+- **TypeScript & Jest Test Suite** (204 tests across 40 test suites):
   ```bash
   npm test
   ```
-- **Type Checking**:
+- **TypeScript Strict Type Checking** (0 errors):
   ```bash
   npm run typecheck
   ```
-- **Privacy Audit**:
-  The privacy audit script checks the codebase for disallowed modules (e.g., `fetch`, `AsyncStorage`, analytics SDKs) to ensure strict adherence to our privacy guidelines.
+- **Zero-Cloud Privacy Audit**:
+  Verifies that zero unauthorized network APIs (`fetch`, `axios`, `XMLHttpRequest`), zero analytics SDKs, and zero unencrypted storage modules are present:
   ```bash
   npm run audit:privacy
   ```
 
 ## Engineering & Privacy Constraints (Non-Negotiables)
 
-1. **Zero Cloud Inference**: 100% offline. No API calls for ASR or SLM.
-2. **Zero Telemetry / Analytics**: No crash reporters or tracking SDKs.
-3. **Audio Ephemerality**: Temporary audio files must be deleted immediately after transcription, even on failure.
-4. **Off-Main-Thread Execution**: All heavy ML inference must run off the JS main thread (via Nitro modules or JSI isolates).
+1. **Zero Cloud Inference**: 100% offline. No audio, transcript, or text ever leaves the physical device.
+2. **Zero Telemetry / Analytics**: No crash reporters, performance trackers, or analytics SDKs.
+3. **Strict Audio Ephemerality**: Temporary audio files are managed via Rust RAII `Drop` and deleted immediately after transcription, even on failure.
+4. **Memory Budget**: Peak RAM remains strictly **< 500 MB** enforced via `ModelCoordinator` mutual exclusion.
+5. **Off-Main-Thread Execution**: All heavy ML inference runs asynchronously on Nitro's background `ThreadPool` off the React Native UI thread.
 
-For deeper context, see [`docs/PRD.md`](docs/PRD.md) and [`docs/TECHNICAL_GUIDE.md`](docs/TECHNICAL_GUIDE.md).
+For deeper context, see [`docs/PRD.md`](docs/PRD.md), [`docs/TECHNICAL_GUIDE.md`](docs/TECHNICAL_GUIDE.md), and [`rust/README.md`](rust/README.md).

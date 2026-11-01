@@ -33,11 +33,11 @@ rust/voicenote-core/
     ├── asr/
     │   ├── mod.rs
     │   ├── whisper.rs           # Whisper ASR engine wrapping whisper-rs (whisper.cpp)
-    │   └── segmenter.rs         # >27s silence-boundary audio slicing & Hinglish language heuristics
+    │   ├── language.rs          # Hinglish bilingual language strategy & script steering prompts
+    │   └── segmenter.rs         # >27s silence-boundary audio slicing
     ├── slm/
     │   ├── mod.rs
     │   ├── llama.rs             # On-device GGUF SLM engine (<500MB RAM budget, header validation & structured rewriting)
-    │   ├── prompt.rs            # Tone rewriting prompt templates (Professional, Casual)
     │   └── validator.rs         # Hallucination guard (entity preservation regex & length bounds)
     └── crypto/
         ├── mod.rs

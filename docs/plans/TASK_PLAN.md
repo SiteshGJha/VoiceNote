@@ -97,8 +97,8 @@
    - [x] Phase 4: LLaMA GGUF SLM engine (`LlamaEngine` header validation & memory coordinator < 500 MB RAM budget), structured tone rewriting validated by Rust hallucination guard (`validate_preservation`), and 60s idle auto-unload.
    - [x] Phase 5: Streaming SHA-256 verifier using `ring`, production dev-guards, and complete developer documentation (`docs/TECHNICAL_GUIDE.md`, `rust/README.md`, `docs/plans/TASK_PLAN.md`).
 7. [x] **Verification**:
-   - Run `cargo test --manifest-path rust/Cargo.toml` (67 Rust tests in 10 suites passing).
-   - Run `npm test` (203 Jest tests in 40 suites passing).
+   - Run `cargo test --manifest-path rust/Cargo.toml` (68 Rust tests in 10 suites passing).
+   - Run `npm test` (204 Jest tests in 40 suites passing).
    - Run `npm run typecheck` (0 errors).
    - Run `npm run audit:privacy` (0 violations).
 
@@ -110,14 +110,14 @@ The VoiceNote native inference and audio layer has been completely migrated to a
 
 | Subsystem | Implementation Details | Test Coverage |
 |---|---|---|
-| **Audio Processing** | `AudioBuffer` with RAII `Drop` ephemerality for safe audio file cleanup, 200ms phoneme-padded silence trimming, 44-byte WAV header encoding | `audio_buffer_test.rs` (6 tests), `silence_trim_test.rs` (7 tests), `wav_test.rs` (6 tests) |
-| **Voice Activity Detection** | Silero VAD V4 ONNX via `tract-onnx` with zero phase distortion, sensitivity presets, and debounced auto-stop gate | `vad_test.rs` (10 tests) |
-| **Whisper ASR** | `whisper-rs` (whisper.cpp) binding, Metal GPU acceleration, CoreML compile check on iOS, silence segmenter for audio >27s, Hinglish language heuristics | `whisper_test.rs` (4 tests), `asr_segmenter_test.rs` (8 tests) |
-| **Tone Rewriting (SLM)** | `LlamaEngine` GGUF container validator, structured tone rewriting with hallucination guard, 60s idle auto-unload | `llama_test.rs` (10 tests) |
+| **Audio Processing** | `AudioBuffer` with RAII `Drop` ephemerality for safe audio file cleanup, 200ms phoneme-padded silence trimming (calibrated 8000.0 peak RMS), 44-byte WAV header encoding | `audio_buffer_test.rs` (6 tests), `silence_trim_test.rs` (7 tests), `wav_test.rs` (6 tests) |
+| **Voice Activity Detection** | Silero VAD V4 ONNX via `tract-onnx` with zero phase distortion, sensitivity presets, debounced auto-stop gate, and `resetVad()` LSTM state clearing | `vad_test.rs` (11 tests), `vadGate.test.ts` |
+| **Whisper ASR** | `whisper-rs` (whisper.cpp) binding, Metal GPU acceleration, CoreML compile check on iOS, silence segmenter for audio >27s, Hinglish language heuristics, asynchronous Nitro ThreadPool execution | `whisper_test.rs` (4 tests), `asr_segmenter_test.rs` (8 tests), `whisperNative.test.ts` |
+| **Tone Rewriting (SLM)** | `LlamaEngine` GGUF container validator, structured tone rewriting with hallucination guard, 60s idle auto-unload, asynchronous Nitro ThreadPool execution | `llama_test.rs` (10 tests), `llamaNative.test.ts` |
 | **Memory Coordinator** | Strict mutual exclusion between ASR and SLM keeping peak memory < 500 MB RAM budget | Included in `llama_test.rs` |
 | **Hallucination Guard** | Entity preservation regex (numbers, currencies, dates, proper nouns) and [0.35x, 2.5x] length ratio bounds | `hallucination_guard_test.rs` (11 tests) |
-| **Cryptographic Verifier** | Streaming SHA-256 verifier via `ring = "0.17"` directly validating model downloads from disk | `crypto_test.rs` (3 tests) |
-| **C-ABI & JSI Bridge** | `cbindgen`-generated `voicenote_core.h`, Nitro `RustCoreHybridObject` C++ shim, typed TypeScript bridge | `scaffold_test.rs` (2 tests), `smokeTest.test.ts` |
+| **Cryptographic Verifier** | Streaming SHA-256 verifier via `ring = "0.17"` directly validating model downloads from disk | `crypto_test.rs` (3 tests), `verifier.test.ts` |
+| **C-ABI & JSI Bridge** | `cbindgen`-generated `voicenote_core.h`, Nitro `RustCoreHybridObject` C++ shim with `Promise::async` ThreadPool, typed TypeScript bridge | `scaffold_test.rs` (2 tests), `smokeTest.test.ts` |
 
 **Verification Metrics:**
 - **Rust Unit Tests**: 67 passed, 0 failed across 10 test suites (`cargo test --manifest-path rust/Cargo.toml`).
