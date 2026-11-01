@@ -42,6 +42,11 @@
 #define WAV_HEADER_SIZE 44
 
 /**
+ * Minimum bytes required to validate GGUF header (magic 4B + version 4B + tensor count 8B + metadata count 8B).
+ */
+#define MIN_GGUF_HEADER_BYTES 24
+
+/**
  * Default minimum speech duration required to transition from `Idle` to `Speech` (300 ms).
  */
 #define VadGate_DEFAULT_MIN_SPEECH_MS 300

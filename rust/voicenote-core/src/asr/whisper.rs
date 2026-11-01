@@ -5,6 +5,7 @@ use tokio::sync::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::errors::{VnError, VnErrorCode};
+use crate::model_coordinator::{ActiveModel, ModelCoordinator};
 
 #[derive(Debug, Clone)]
 pub struct AsrOutput {
@@ -50,6 +51,10 @@ impl WhisperEngine {
                 format!("Failed to load Whisper context: {:?}", e),
             )
         })?;
+
+        ModelCoordinator::global()
+            .request_subsystem(ActiveModel::Whisper, Some(model_path.to_string_lossy().as_ref()))
+            .await?;
 
         Ok(Self {
             ctx: Some(Arc::new(Mutex::new(ctx))),

@@ -1,6 +1,8 @@
 pub mod asr;
 pub mod audio;
 pub mod errors;
+pub mod model_coordinator;
+pub mod slm;
 pub mod vad;
 
 pub use asr::{AsrOutput, WhisperEngine};
@@ -8,6 +10,8 @@ pub use audio::{
     trim_silence, trim_silence_with_rate, wrap_pcm_with_wav_header, AudioBuffer, TrimResult,
 };
 pub use errors::{VnError, VnErrorCode};
+pub use model_coordinator::{ActiveModel, ModelCoordinator};
+pub use slm::LlamaEngine;
 
 use std::ffi::CString;
 use std::os::raw::{c_char, c_void};
