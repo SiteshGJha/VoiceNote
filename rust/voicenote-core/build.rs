@@ -16,6 +16,11 @@ fn main() {
         .expect("Unable to generate C bindings")
         .write_to_file(out_file);
 
+    if std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "ios"
+        && !cfg!(feature = "coreml") {
+        println!("cargo:warning=[CoreML Alert] whisper-rs built for iOS without CoreML feature. Fallback to CPU NEON will be active.");
+    }
+
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=src/errors.rs");
     println!("cargo:rerun-if-changed=cbindgen.toml");

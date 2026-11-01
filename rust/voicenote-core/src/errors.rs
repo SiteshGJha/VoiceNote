@@ -86,6 +86,25 @@ pub enum VnError {
 }
 
 impl VnError {
+    pub fn new(code: VnErrorCode, msg: impl Into<String>) -> Self {
+        let msg = msg.into();
+        match code {
+            VnErrorCode::AsrEmptyOutput => VnError::AsrEmptyOutput,
+            VnErrorCode::AsrTimeout => VnError::AsrTimeout,
+            VnErrorCode::AsrModelMissing => VnError::AsrModelMissing(msg),
+            VnErrorCode::SlmTimeout => VnError::SlmTimeout,
+            VnErrorCode::SlmHallucinationSuspected => VnError::SlmHallucinationSuspected(msg),
+            VnErrorCode::ModelChecksumFailed => VnError::ModelChecksumFailed(msg),
+            VnErrorCode::AudioRecordFailed => VnError::AudioRecordFailed(msg),
+            VnErrorCode::VadNoSpeech => VnError::VadNoSpeech,
+            VnErrorCode::SegmentMergeFailed => VnError::SegmentMergeFailed(msg),
+            VnErrorCode::RecordingLimitReached => VnError::RecordingLimitReached,
+            VnErrorCode::HardwareTriggerDenied => VnError::HardwareTriggerDenied(msg),
+            VnErrorCode::StorageFull => VnError::StorageFull,
+            VnErrorCode::Unknown => VnError::Unknown(msg),
+        }
+    }
+
     pub fn code(&self) -> VnErrorCode {
         match self {
             VnError::AsrEmptyOutput => VnErrorCode::AsrEmptyOutput,
