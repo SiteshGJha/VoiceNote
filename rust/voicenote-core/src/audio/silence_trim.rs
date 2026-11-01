@@ -31,7 +31,7 @@ pub struct TrimResult {
 
 /// Computes the normalized RMS energy [0.0, 1.0] for a slice of 16-bit PCM samples.
 #[inline]
-fn compute_frame_rms(frame: &[i16]) -> f32 {
+pub fn compute_frame_rms(frame: &[i16]) -> f32 {
     if frame.is_empty() {
         return 0.0;
     }
