@@ -49,7 +49,10 @@ function createDefaultMockInstance(): IRustCoreHybridObject {
         probability: normalized,
       };
     },
-    transcribe: (
+    resetVad: () => {
+      // In-memory mock reset
+    },
+    transcribe: async (
       pcm: ArrayBuffer,
       _modelPath: string,
       language?: string,
@@ -76,7 +79,7 @@ function createDefaultMockInstance(): IRustCoreHybridObject {
         durationMs: 150,
       };
     },
-    generate: (
+    generate: async (
       prompt: string,
       modelPath: string,
       _temperature?: number,

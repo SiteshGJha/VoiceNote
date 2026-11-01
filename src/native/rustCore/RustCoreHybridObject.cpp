@@ -2,6 +2,7 @@
 #include <NitroModules/HybridObjectRegistry.hpp>
 #include <NitroModules/Prototype.hpp>
 #include <NitroModules/JSIConverter.hpp>
+#include <NitroModules/Promise.hpp>
 
 namespace margelo::nitro {
 template <>
@@ -166,65 +167,73 @@ VadEvalResult RustCoreHybridObject::evalVad(
   return VadEvalResult { isSpeech, static_cast<double>(prob) };
 }
 
-AsrNativeResult RustCoreHybridObject::transcribe(
+void RustCoreHybridObject::resetVad() {
+  if (vadHandle_) {
+    vn_vad_reset(vadHandle_);
+  }
+}
+
+std::shared_ptr<margelo::nitro::Promise<voicenote::AsrNativeResult>> RustCoreHybridObject::transcribe(
   const std::shared_ptr<margelo::nitro::ArrayBuffer>& pcm,
   const std::string& modelPath,
   std::optional<std::string> language,
   std::optional<std::string> prompt,
   std::optional<double> timeoutMs
 ) {
-  const int16_t* pcm_ptr = (pcm && pcm->size() > 0) ? reinterpret_cast<const int16_t*>(pcm->data()) : nullptr;
-  uintptr_t sample_count = (pcm && pcm->size() > 0) ? (pcm->size() / sizeof(int16_t)) : 0;
-  const char* lang_cstr = (language.has_value() && !language.value().empty()) ? language.value().c_str() : nullptr;
-  const char* prompt_cstr = (prompt.has_value() && !prompt.value().empty()) ? prompt.value().c_str() : nullptr;
-  uint64_t timeout = (timeoutMs.has_value() && timeoutMs.value() > 0) ? static_cast<uint64_t>(timeoutMs.value()) : 30000;
+  return margelo::nitro::Promise<voicenote::AsrNativeResult>::async([=]() {
+    const int16_t* pcm_ptr = (pcm && pcm->size() > 0) ? reinterpret_cast<const int16_t*>(pcm->data()) : nullptr;
+    uintptr_t sample_count = (pcm && pcm->size() > 0) ? (pcm->size() / sizeof(int16_t)) : 0;
+    const char* lang_cstr = (language.has_value() && !language.value().empty()) ? language.value().c_str() : nullptr;
+    const char* prompt_cstr = (prompt.has_value() && !prompt.value().empty()) ? prompt.value().c_str() : nullptr;
+    uint64_t timeout = (timeoutMs.has_value() && timeoutMs.value() > 0) ? static_cast<uint64_t>(timeoutMs.value()) : 30000;
 
-  VnAsrResponse* resp = vn_asr_transcribe(
-    pcm_ptr,
-    sample_count,
-    modelPath.c_str(),
-    lang_cstr,
-    prompt_cstr,
-    timeout
-  );
+    VnAsrResponse* resp = vn_asr_transcribe(
+      pcm_ptr,
+      sample_count,
+      modelPath.c_str(),
+      lang_cstr,
+      prompt_cstr,
+      timeout
+    );
 
-  if (!resp) {
-    throw std::runtime_error("UNKNOWN: vn_asr_transcribe returned null");
-  }
-
-  int32_t status = resp->status;
-  if (status < 0) {
-    int32_t code = -status;
-    std::string errCodeStr = "UNKNOWN";
-    switch (code) {
-      case AsrEmptyOutput: errCodeStr = "ASR_EMPTY_OUTPUT"; break;
-      case AsrTimeout: errCodeStr = "ASR_TIMEOUT"; break;
-      case AsrModelMissing: errCodeStr = "ASR_MODEL_MISSING"; break;
-      case SlmTimeout: errCodeStr = "SLM_TIMEOUT"; break;
-      case SlmHallucinationSuspected: errCodeStr = "SLM_HALLUCINATION_SUSPECTED"; break;
-      case ModelChecksumFailed: errCodeStr = "MODEL_CHECKSUM_FAILED"; break;
-      case AudioRecordFailed: errCodeStr = "AUDIO_RECORD_FAILED"; break;
-      case VadNoSpeech: errCodeStr = "VAD_NO_SPEECH"; break;
-      case SegmentMergeFailed: errCodeStr = "SEGMENT_MERGE_FAILED"; break;
-      case RecordingLimitReached: errCodeStr = "RECORDING_LIMIT_REACHED"; break;
-      case HardwareTriggerDenied: errCodeStr = "HARDWARE_TRIGGER_DENIED"; break;
-      case StorageFull: errCodeStr = "STORAGE_FULL"; break;
-      default: errCodeStr = "UNKNOWN"; break;
+    if (!resp) {
+      throw std::runtime_error("UNKNOWN: vn_asr_transcribe returned null");
     }
+
+    int32_t status = resp->status;
+    if (status < 0) {
+      int32_t code = -status;
+      std::string errCodeStr = "UNKNOWN";
+      switch (code) {
+        case AsrEmptyOutput: errCodeStr = "ASR_EMPTY_OUTPUT"; break;
+        case AsrTimeout: errCodeStr = "ASR_TIMEOUT"; break;
+        case AsrModelMissing: errCodeStr = "ASR_MODEL_MISSING"; break;
+        case SlmTimeout: errCodeStr = "SLM_TIMEOUT"; break;
+        case SlmHallucinationSuspected: errCodeStr = "SLM_HALLUCINATION_SUSPECTED"; break;
+        case ModelChecksumFailed: errCodeStr = "MODEL_CHECKSUM_FAILED"; break;
+        case AudioRecordFailed: errCodeStr = "AUDIO_RECORD_FAILED"; break;
+        case VadNoSpeech: errCodeStr = "VAD_NO_SPEECH"; break;
+        case SegmentMergeFailed: errCodeStr = "SEGMENT_MERGE_FAILED"; break;
+        case RecordingLimitReached: errCodeStr = "RECORDING_LIMIT_REACHED"; break;
+        case HardwareTriggerDenied: errCodeStr = "HARDWARE_TRIGGER_DENIED"; break;
+        case StorageFull: errCodeStr = "STORAGE_FULL"; break;
+        default: errCodeStr = "UNKNOWN"; break;
+      }
+      vn_asr_response_free(resp);
+      throw std::runtime_error(errCodeStr);
+    }
+
+    std::string text = resp->text ? resp->text : "";
+    std::string detectedLang = resp->detected_lang ? resp->detected_lang : "en";
+    double duration = static_cast<double>(resp->duration_ms);
+
     vn_asr_response_free(resp);
-    throw std::runtime_error(errCodeStr);
-  }
 
-  std::string text = resp->text ? resp->text : "";
-  std::string detectedLang = resp->detected_lang ? resp->detected_lang : "en";
-  double duration = static_cast<double>(resp->duration_ms);
-
-  vn_asr_response_free(resp);
-
-  return AsrNativeResult { text, detectedLang, duration };
+    return AsrNativeResult { text, detectedLang, duration };
+  });
 }
 
-SlmNativeResult RustCoreHybridObject::generate(
+std::shared_ptr<margelo::nitro::Promise<voicenote::SlmNativeResult>> RustCoreHybridObject::generate(
   const std::string& prompt,
   const std::string& modelPath,
   std::optional<double> temperature,
@@ -232,53 +241,55 @@ SlmNativeResult RustCoreHybridObject::generate(
   std::optional<double> maxTokens,
   std::optional<double> timeoutMs
 ) {
-  float temp = (temperature.has_value() && temperature.value() >= 0) ? static_cast<float>(temperature.value()) : 0.7f;
-  float p = (topP.has_value() && topP.value() >= 0) ? static_cast<float>(topP.value()) : 0.9f;
-  uint32_t tokens = (maxTokens.has_value() && maxTokens.value() > 0) ? static_cast<uint32_t>(maxTokens.value()) : 512;
-  uint64_t timeout = (timeoutMs.has_value() && timeoutMs.value() > 0) ? static_cast<uint64_t>(timeoutMs.value()) : 10000;
+  return margelo::nitro::Promise<voicenote::SlmNativeResult>::async([=]() {
+    float temp = (temperature.has_value() && temperature.value() >= 0) ? static_cast<float>(temperature.value()) : 0.7f;
+    float p = (topP.has_value() && topP.value() >= 0) ? static_cast<float>(topP.value()) : 0.9f;
+    uint32_t tokens = (maxTokens.has_value() && maxTokens.value() > 0) ? static_cast<uint32_t>(maxTokens.value()) : 512;
+    uint64_t timeout = (timeoutMs.has_value() && timeoutMs.value() > 0) ? static_cast<uint64_t>(timeoutMs.value()) : 10000;
 
-  VnSlmResponse* resp = vn_slm_generate(
-    prompt.c_str(),
-    modelPath.c_str(),
-    temp,
-    p,
-    tokens,
-    timeout
-  );
+    VnSlmResponse* resp = vn_slm_generate(
+      prompt.c_str(),
+      modelPath.c_str(),
+      temp,
+      p,
+      tokens,
+      timeout
+    );
 
-  if (!resp) {
-    throw std::runtime_error("UNKNOWN: vn_slm_generate returned null");
-  }
-
-  int32_t status = resp->status;
-  if (status < 0) {
-    int32_t code = -status;
-    std::string errCodeStr = "UNKNOWN";
-    switch (code) {
-      case AsrEmptyOutput: errCodeStr = "ASR_EMPTY_OUTPUT"; break;
-      case AsrTimeout: errCodeStr = "ASR_TIMEOUT"; break;
-      case AsrModelMissing: errCodeStr = "ASR_MODEL_MISSING"; break;
-      case SlmTimeout: errCodeStr = "SLM_TIMEOUT"; break;
-      case SlmHallucinationSuspected: errCodeStr = "SLM_HALLUCINATION_SUSPECTED"; break;
-      case ModelChecksumFailed: errCodeStr = "MODEL_CHECKSUM_FAILED"; break;
-      case AudioRecordFailed: errCodeStr = "AUDIO_RECORD_FAILED"; break;
-      case VadNoSpeech: errCodeStr = "VAD_NO_SPEECH"; break;
-      case SegmentMergeFailed: errCodeStr = "SEGMENT_MERGE_FAILED"; break;
-      case RecordingLimitReached: errCodeStr = "RECORDING_LIMIT_REACHED"; break;
-      case HardwareTriggerDenied: errCodeStr = "HARDWARE_TRIGGER_DENIED"; break;
-      case StorageFull: errCodeStr = "STORAGE_FULL"; break;
-      default: errCodeStr = "UNKNOWN"; break;
+    if (!resp) {
+      throw std::runtime_error("UNKNOWN: vn_slm_generate returned null");
     }
+
+    int32_t status = resp->status;
+    if (status < 0) {
+      int32_t code = -status;
+      std::string errCodeStr = "UNKNOWN";
+      switch (code) {
+        case AsrEmptyOutput: errCodeStr = "ASR_EMPTY_OUTPUT"; break;
+        case AsrTimeout: errCodeStr = "ASR_TIMEOUT"; break;
+        case AsrModelMissing: errCodeStr = "ASR_MODEL_MISSING"; break;
+        case SlmTimeout: errCodeStr = "SLM_TIMEOUT"; break;
+        case SlmHallucinationSuspected: errCodeStr = "SLM_HALLUCINATION_SUSPECTED"; break;
+        case ModelChecksumFailed: errCodeStr = "MODEL_CHECKSUM_FAILED"; break;
+        case AudioRecordFailed: errCodeStr = "AUDIO_RECORD_FAILED"; break;
+        case VadNoSpeech: errCodeStr = "VAD_NO_SPEECH"; break;
+        case SegmentMergeFailed: errCodeStr = "SEGMENT_MERGE_FAILED"; break;
+        case RecordingLimitReached: errCodeStr = "RECORDING_LIMIT_REACHED"; break;
+        case HardwareTriggerDenied: errCodeStr = "HARDWARE_TRIGGER_DENIED"; break;
+        case StorageFull: errCodeStr = "STORAGE_FULL"; break;
+        default: errCodeStr = "UNKNOWN"; break;
+      }
+      vn_slm_response_free(resp);
+      throw std::runtime_error(errCodeStr);
+    }
+
+    std::string text = resp->text ? resp->text : "";
+    double duration = static_cast<double>(resp->duration_ms);
+
     vn_slm_response_free(resp);
-    throw std::runtime_error(errCodeStr);
-  }
 
-  std::string text = resp->text ? resp->text : "";
-  double duration = static_cast<double>(resp->duration_ms);
-
-  vn_slm_response_free(resp);
-
-  return SlmNativeResult { text, duration };
+    return SlmNativeResult { text, duration };
+  });
 }
 
 bool RustCoreHybridObject::verifyFileSha256(const std::string& filePath, const std::string& expectedHex) {
@@ -292,6 +303,7 @@ void RustCoreHybridObject::loadHybridMethods() {
     prototype.registerHybridMethod("getVersion", &RustCoreHybridObject::getVersion);
     prototype.registerHybridMethod("trimAndSaveWav", &RustCoreHybridObject::trimAndSaveWav);
     prototype.registerHybridMethod("evalVad", &RustCoreHybridObject::evalVad);
+    prototype.registerHybridMethod("resetVad", &RustCoreHybridObject::resetVad);
     prototype.registerHybridMethod("transcribe", &RustCoreHybridObject::transcribe);
     prototype.registerHybridMethod("generate", &RustCoreHybridObject::generate);
     prototype.registerHybridMethod("verifyFileSha256", &RustCoreHybridObject::verifyFileSha256);

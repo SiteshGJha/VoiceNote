@@ -126,13 +126,8 @@ pub unsafe extern "C" fn vn_vad_create(sensitivity_mode: u8) -> *mut c_void {
         3 => vad::VadSensitivity::High,
         _ => vad::VadSensitivity::Medium,
     };
-    match vad::VadGate::new_default(sensitivity) {
-        Ok(gate) => Box::into_raw(Box::new(gate)) as *mut c_void,
-        Err(_) => {
-            let gate = vad::VadGate::new_rms(sensitivity);
-            Box::into_raw(Box::new(gate)) as *mut c_void
-        }
-    }
+    let gate = vad::VadGate::new(sensitivity);
+    Box::into_raw(Box::new(gate)) as *mut c_void
 }
 
 /// Frees a VAD instance previously created by `vn_vad_create`.

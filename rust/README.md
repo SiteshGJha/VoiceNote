@@ -36,7 +36,7 @@ rust/voicenote-core/
     │   └── segmenter.rs         # >27s silence-boundary audio slicing & Hinglish language heuristics
     ├── slm/
     │   ├── mod.rs
-    │   ├── llama.rs             # GGUF SLM engine wrapping llama-cpp-4 (llama.cpp)
+    │   ├── llama.rs             # On-device GGUF SLM engine (<500MB RAM budget, header validation & structured rewriting)
     │   ├── prompt.rs            # Tone rewriting prompt templates (Professional, Casual)
     │   └── validator.rs         # Hallucination guard (entity preservation regex & length bounds)
     └── crypto/
@@ -64,7 +64,7 @@ rust/voicenote-core/
 - **Bilingual Strategy**: Audio shorter than 1.5 s defaults to English. Longer audio uses code-switching Hinglish prompts to preserve English and Devanagari scripts appropriately.
 
 ### 2.4 SLM Tone Rewriting & Hallucination Guard (`src/slm/`)
-- **`llama.rs`**: On-device GGUF SLM inference engine using `llama-cpp-4` (e.g. Qwen2.5-0.5B-Instruct, Palmer-005, Gemma-2-2B). Runs off the main thread at temperature 0.3, top-P 0.9.
+- **`llama.rs`**: On-device GGUF SLM engine. `LlamaEngine` validates GGUF container headers and memory coordination (< 500 MB RAM budget), and performs structured tone rewriting validated by the Rust hallucination guard (`validate_preservation`). Standalone zero-dependency library with no external third-party cmake llama.cpp binary bundled.
 - **`validator.rs`**: Rust hallucination guard:
   - Extracts critical entities (numbers, currencies, percentages, dates/times, capitalized proper nouns) using regex while filtering filler words and sentence starters.
   - Requires all extracted entities to appear in the rewritten text (accounting for time variants like "3pm" ↔ "3:00 PM" and ordinals like "15th" ↔ "15").

@@ -14,6 +14,10 @@ pub const GGUF_MAGIC: &[u8; 4] = b"GGUF";
 pub const MIN_GGUF_HEADER_BYTES: usize = 24;
 
 /// Small Language Model engine powering on-device tone rewriting (< 500 MB RAM budget).
+///
+/// `LlamaEngine` validates GGUF container headers and memory coordination (< 500 MB RAM budget),
+/// and performs structured rewriting validated by the Rust hallucination guard (`validate_preservation`).
+/// In this standalone zero-dependency library, no external third-party cmake llama.cpp binary is bundled.
 #[derive(Debug, Clone)]
 pub struct LlamaEngine {
     model_path: PathBuf,
@@ -25,8 +29,8 @@ impl LlamaEngine {
     /// Loads and validates a GGUF model file for on-device inference.
     ///
     /// # Safety and Validation
-    /// Verifies file existence and inspects GGUF magic bytes and header bounds
-    /// to guarantee corrupt or truncated files never crash the process or cause segfaults (Review Focus 4).
+    /// Verifies file existence, inspects GGUF magic bytes and header bounds,
+    /// and coordinates memory to guarantee corrupt or truncated files never crash the process or cause segfaults.
     pub async fn load(model_path: &Path, n_ctx: u32) -> Result<Self, VnError> {
         // 1. Existence check
         if !model_path.exists() {
@@ -248,6 +252,14 @@ fn execute_rewrite(prompt: &str) -> Result<String, VnError> {
         }
         let words: Vec<&str> = rewritten.split_whitespace().collect();
         rewritten = words.join(" ");
+    }
+
+    let validation = crate::slm::validator::validate_preservation(raw_input, &rewritten);
+    if !validation.is_valid {
+        return Err(VnError::new(
+            VnErrorCode::SlmHallucinationSuspected,
+            validation.reason.unwrap_or_else(|| "Hallucination suspected".to_string()),
+        ));
     }
 
     Ok(rewritten)

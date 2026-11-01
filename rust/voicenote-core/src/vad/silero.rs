@@ -27,17 +27,45 @@ impl std::fmt::Debug for SileroVad {
     }
 }
 
-pub const EMBEDDED_MODEL_BYTES: &[u8] = include_bytes!("../../../../assets/silero_vad.onnx");
-
 impl SileroVad {
     /// Number of audio samples per VAD evaluation frame (512 samples @ 16 kHz = 32 ms).
     pub const FRAME_SIZE: usize = 512;
     /// Supported sampling rate for Silero VAD v4.
     pub const SAMPLE_RATE: i64 = 16000;
 
-    /// Creates a new `SileroVad` instance using the embedded Silero ONNX model.
+    /// Creates a new `SileroVad` instance by loading ONNX model weights from a file path.
+    pub fn from_file(path: &std::path::Path, sensitivity: VadSensitivity) -> Result<Self, VnError> {
+        if !path.exists() {
+            return Err(VnError::new(
+                crate::errors::VnErrorCode::AsrModelMissing,
+                format!("Silero VAD model file not found at: {}", path.display()),
+            ));
+        }
+        let bytes = std::fs::read(path).map_err(|e| {
+            VnError::new(
+                crate::errors::VnErrorCode::AsrModelMissing,
+                format!("Failed to read Silero VAD model file: {}", e),
+            )
+        })?;
+        Self::new(&bytes, sensitivity)
+    }
+
+    /// Creates a new `SileroVad` instance using the default Silero ONNX model on disk if present.
     pub fn new_default(sensitivity: VadSensitivity) -> Result<Self, VnError> {
-        Self::new(EMBEDDED_MODEL_BYTES, sensitivity)
+        let candidates = [
+            std::path::Path::new("assets/silero_vad.onnx"),
+            std::path::Path::new("../../assets/silero_vad.onnx"),
+            std::path::Path::new("../../../assets/silero_vad.onnx"),
+        ];
+        for path in &candidates {
+            if path.exists() {
+                return Self::from_file(path, sensitivity);
+            }
+        }
+        Err(VnError::new(
+            crate::errors::VnErrorCode::AsrModelMissing,
+            "Silero VAD model file not found on disk",
+        ))
     }
 
     /// Creates a new `SileroVad` instance from in-memory ONNX model bytes and a sensitivity preset.

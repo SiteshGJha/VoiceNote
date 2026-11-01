@@ -41,7 +41,7 @@ pub fn compute_frame_rms(frame: &[i16]) -> f32 {
         sum_sq += s * s;
     }
     let mean_sq = sum_sq / frame.len() as f64;
-    (mean_sq.sqrt() / 32768.0) as f32
+    ((mean_sq.sqrt() / 8000.0).clamp(0.0, 1.0)) as f32
 }
 
 /// Trims leading and trailing silence from 16-bit PCM audio sampled at the default 16 kHz rate.

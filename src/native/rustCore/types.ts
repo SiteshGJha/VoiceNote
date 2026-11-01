@@ -18,13 +18,14 @@ export interface IRustCoreHybridObject {
   getVersion(): string;
   trimAndSaveWav(pcm: ArrayBuffer, outputPath: string, paddingMs?: number): { hasSpeech: boolean; status: number };
   evalVad(pcm: ArrayBuffer, sensitivityMode?: number): VadEvalResult;
+  resetVad(): void;
   transcribe(
     pcm: ArrayBuffer,
     modelPath: string,
     language?: string,
     prompt?: string,
     timeoutMs?: number
-  ): AsrNativeResult;
+  ): Promise<AsrNativeResult>;
   generate(
     prompt: string,
     modelPath: string,
@@ -32,6 +33,6 @@ export interface IRustCoreHybridObject {
     topP?: number,
     maxTokens?: number,
     timeoutMs?: number
-  ): SlmNativeResult;
+  ): Promise<SlmNativeResult>;
   verifyFileSha256(filePath: string, expectedHex: string): boolean;
 }

@@ -35,4 +35,8 @@ describe('WebRtcVad Native Adapter', () => {
     expect(result.isSpeech).toBe(true);
     expect(result.probability).toBeGreaterThan(0.5);
   });
+
+  it('resets recurrent VAD state cleanly', () => {
+    expect(() => webrtcVad.reset()).not.toThrow();
+  });
 });

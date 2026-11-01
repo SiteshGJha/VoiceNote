@@ -1,6 +1,7 @@
 #pragma once
 #include <NitroModules/HybridObject.hpp>
 #include <NitroModules/ArrayBuffer.hpp>
+#include <NitroModules/Promise.hpp>
 #include <string>
 #include <memory>
 #include <optional>
@@ -43,14 +44,15 @@ public:
     const std::shared_ptr<margelo::nitro::ArrayBuffer>& pcm,
     std::optional<double> sensitivityMode
   );
-  AsrNativeResult transcribe(
+  void resetVad();
+  std::shared_ptr<margelo::nitro::Promise<voicenote::AsrNativeResult>> transcribe(
     const std::shared_ptr<margelo::nitro::ArrayBuffer>& pcm,
     const std::string& modelPath,
     std::optional<std::string> language,
     std::optional<std::string> prompt,
     std::optional<double> timeoutMs
   );
-  SlmNativeResult generate(
+  std::shared_ptr<margelo::nitro::Promise<voicenote::SlmNativeResult>> generate(
     const std::string& prompt,
     const std::string& modelPath,
     std::optional<double> temperature,

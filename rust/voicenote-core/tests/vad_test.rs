@@ -4,11 +4,29 @@ use voicenote_core::vad::silero::SileroVad;
 use voicenote_core::VnErrorCode;
 use voicenote_core::{vn_vad_create, vn_vad_eval_pcm_chunk, vn_vad_free, vn_vad_reset};
 
-static MODEL_BYTES: &[u8] = include_bytes!("../../../assets/silero_vad.onnx");
+static MODEL_BYTES: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+
+fn get_model_bytes() -> &'static [u8] {
+    MODEL_BYTES.get_or_init(|| {
+        let candidates = [
+            "assets/silero_vad.onnx",
+            "../../assets/silero_vad.onnx",
+            "../../../assets/silero_vad.onnx",
+        ];
+        for p in &candidates {
+            if std::path::Path::new(p).exists() {
+                if let Ok(b) = std::fs::read(p) {
+                    return b;
+                }
+            }
+        }
+        panic!("silero_vad.onnx not found on disk");
+    })
+}
 
 #[test]
 fn silero_vad_detects_silence_below_threshold() {
-    let mut vad = SileroVad::new(MODEL_BYTES, VadSensitivity::Medium).unwrap();
+    let mut vad = SileroVad::new(get_model_bytes(), VadSensitivity::Medium).unwrap();
     let zero_frame = vec![0.0f32; 512];
     let prob = vad.process_frame_512(&zero_frame).unwrap();
     assert!(prob < 0.1, "Silence probability must be < 0.1, got {}", prob);
@@ -16,7 +34,7 @@ fn silero_vad_detects_silence_below_threshold() {
 
 #[test]
 fn silero_vad_detects_speech_above_threshold() {
-    let mut vad = SileroVad::new(MODEL_BYTES, VadSensitivity::Medium).unwrap();
+    let mut vad = SileroVad::new(get_model_bytes(), VadSensitivity::Medium).unwrap();
 
     // First feed 5 frames of silence to stabilize state
     let silence = vec![0.0f32; 512];
@@ -66,7 +84,7 @@ fn silero_vad_respects_sensitivity_presets() {
     assert_eq!(med.silence_window_ms(), 1500);
     assert_eq!(high.silence_window_ms(), 1000);
 
-    let mut vad = SileroVad::new(MODEL_BYTES, VadSensitivity::High).unwrap();
+    let mut vad = SileroVad::new(get_model_bytes(), VadSensitivity::High).unwrap();
     assert_eq!(vad.sensitivity(), VadSensitivity::High);
 
     vad.set_sensitivity(VadSensitivity::Low);
@@ -75,8 +93,7 @@ fn silero_vad_respects_sensitivity_presets() {
 
 #[test]
 fn silero_vad_invalid_frame_size_returns_error() {
-    let mut vad = SileroVad::new(MODEL_BYTES, VadSensitivity::Medium).unwrap();
-
+    let mut vad = SileroVad::new(get_model_bytes(), VadSensitivity::Medium).unwrap();
     let short_frame = vec![0.0f32; 256];
     let err = vad.process_frame_512(&short_frame).unwrap_err();
     assert_eq!(err.code(), VnErrorCode::AudioRecordFailed);
@@ -99,7 +116,7 @@ fn silero_vad_empty_or_corrupted_model_bytes_returns_error() {
 
 #[test]
 fn silero_vad_reset_state_clears_lstm_memory() {
-    let mut vad = SileroVad::new(MODEL_BYTES, VadSensitivity::Medium).unwrap();
+    let mut vad = SileroVad::new(get_model_bytes(), VadSensitivity::Medium).unwrap();
 
     // Push speech frames
     for i in 0..5 {
@@ -126,8 +143,8 @@ fn silero_vad_reset_state_clears_lstm_memory() {
 
 #[test]
 fn vad_gate_detects_speech_and_transitions_state() {
-    let vad = SileroVad::new(MODEL_BYTES, VadSensitivity::Medium).unwrap();
-    let mut gate = VadGate::new(vad, VadSensitivity::Medium);
+    let vad = SileroVad::new(get_model_bytes(), VadSensitivity::Medium).unwrap();
+    let mut gate = VadGate::new_with_vad(vad, VadSensitivity::Medium);
 
     assert_eq!(gate.state(), VadState::Idle);
     assert!(!gate.has_detected_speech());
@@ -172,9 +189,9 @@ fn vad_gate_detects_speech_and_transitions_state() {
 
 #[test]
 fn vad_gate_auto_stop_triggers_after_silence_window() {
-    let vad = SileroVad::new(MODEL_BYTES, VadSensitivity::High).unwrap();
+    let vad = SileroVad::new(get_model_bytes(), VadSensitivity::High).unwrap();
     // High sensitivity: silence window is 1000 ms
-    let mut gate = VadGate::new(vad, VadSensitivity::High);
+    let mut gate = VadGate::new_with_vad(vad, VadSensitivity::High);
 
     let silent_frame = vec![0i16; 480];
     for _ in 0..5 {
@@ -209,8 +226,8 @@ fn vad_gate_auto_stop_triggers_after_silence_window() {
 
 #[test]
 fn vad_gate_reset_clears_state() {
-    let vad = SileroVad::new(MODEL_BYTES, VadSensitivity::High).unwrap();
-    let mut gate = VadGate::new(vad, VadSensitivity::High);
+    let vad = SileroVad::new(get_model_bytes(), VadSensitivity::High).unwrap();
+    let mut gate = VadGate::new_with_vad(vad, VadSensitivity::High);
 
     let silent_frame = vec![0i16; 480];
     for _ in 0..5 {
@@ -277,5 +294,20 @@ fn vn_vad_eval_pcm_chunk_c_abi() {
         let prob_null_pcm = vn_vad_eval_pcm_chunk(std::ptr::null_mut(), std::ptr::null(), 0, 2);
         assert_eq!(prob_null_pcm, 0.0);
     }
+}
+
+#[test]
+fn silero_vad_dynamic_loading_and_gate_fallback() {
+    // 1. Loading from missing file returns AsrModelMissing
+    let missing_path = std::path::Path::new("/tmp/missing_silero_vad_12345.onnx");
+    let err = SileroVad::from_file(missing_path, VadSensitivity::Medium).unwrap_err();
+    assert_eq!(err.code(), VnErrorCode::AsrModelMissing);
+
+    // 2. VadGate::new(sensitivity) initializes cleanly (either SileroVad if file on disk, or new_rms)
+    let mut gate = VadGate::new(VadSensitivity::Medium);
+    assert_eq!(gate.state(), VadState::Idle);
+    let pcm = vec![0i16; 480];
+    let res = gate.process_frame(&pcm, 30).unwrap();
+    assert!(!res.is_speech);
 }
 

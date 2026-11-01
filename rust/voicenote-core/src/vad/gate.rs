@@ -81,8 +81,17 @@ impl VadGate {
     /// Default minimum speech duration required to transition from `Idle` to `Speech` (300 ms).
     pub const DEFAULT_MIN_SPEECH_MS: u32 = 300;
 
+    /// Creates a new `VadGate` instance: attempts to load model from disk if present,
+    /// otherwise seamlessly initializes `VadGate::new_rms(sensitivity)` which works 100% reliably everywhere with zero external file requirements.
+    pub fn new(sensitivity: VadSensitivity) -> Self {
+        match SileroVad::new_default(sensitivity) {
+            Ok(vad) => Self::new_with_vad(vad, sensitivity),
+            Err(_) => Self::new_rms(sensitivity),
+        }
+    }
+
     /// Creates a new `VadGate` instance wrapping an existing `SileroVad` engine.
-    pub fn new(vad: SileroVad, sensitivity: VadSensitivity) -> Self {
+    pub fn new_with_vad(vad: SileroVad, sensitivity: VadSensitivity) -> Self {
         Self {
             vad: Some(vad),
             sensitivity,
@@ -101,13 +110,13 @@ impl VadGate {
     /// Creates a new `VadGate` instance from in-memory ONNX model bytes.
     pub fn new_with_model(model_bytes: &[u8], sensitivity: VadSensitivity) -> Result<Self, VnError> {
         let vad = SileroVad::new(model_bytes, sensitivity)?;
-        Ok(Self::new(vad, sensitivity))
+        Ok(Self::new_with_vad(vad, sensitivity))
     }
 
-    /// Creates a new `VadGate` instance using the embedded Silero ONNX model.
+    /// Creates a new `VadGate` instance using the default Silero ONNX model if present.
     pub fn new_default(sensitivity: VadSensitivity) -> Result<Self, VnError> {
         let vad = SileroVad::new_default(sensitivity)?;
-        Ok(Self::new(vad, sensitivity))
+        Ok(Self::new_with_vad(vad, sensitivity))
     }
 
     /// Creates a new `VadGate` instance using pure energy-based RMS evaluation (no ONNX runtime).

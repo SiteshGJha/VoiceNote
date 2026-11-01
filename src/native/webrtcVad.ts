@@ -39,6 +39,10 @@ export class WebRtcVadAdapter {
     return this.isNativeModuleAvailable;
   }
 
+  public reset(): void {
+    getRustCore()?.resetVad();
+  }
+
   /**
    * Evaluates a 16 kHz 16-bit linear PCM frame (typically 10, 20, or 30 ms).
    * @param frameBytes 16-bit PCM frame (e.g. 960 bytes for 30 ms @ 16 kHz)

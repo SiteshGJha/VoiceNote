@@ -123,7 +123,7 @@ export class WhisperNativeBridge {
     await this.loadModel(opts.modelPath);
     this.resetIdleTimer();
 
-    const inferencePromise = new Promise<WhisperNativeResult>((resolve, reject) => {
+    const inferencePromise = new Promise<WhisperNativeResult>(async (resolve, reject) => {
       try {
         if (this.mockInferenceHook) {
           const result = this.mockInferenceHook(opts);
@@ -171,7 +171,7 @@ export class WhisperNativeBridge {
         const rustCore = getRustCore();
         if (rustCore) {
           try {
-            const res = rustCore.transcribe(
+            const res = await rustCore.transcribe(
               pcmBuffer,
               opts.modelPath,
               opts.language,

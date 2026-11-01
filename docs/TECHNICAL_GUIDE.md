@@ -44,7 +44,7 @@ VoiceNote is a **fully offline, privacy-first mobile voice-memo app** that:
 │  • AudioBuffer: RAII Drop file ephemerality  │  │ MMKV (encrypted storage)  │
 │  • Silero VAD V4 ONNX: tract-onnx engine     │  │ Clipboard · Share sheet   │
 │  • Whisper ASR: whisper-rs + segmenter       │  │ Filesystem (models/temp)  │
-│  • LLaMA SLM: llama-cpp-4 + GGUF engine      │  │ Microphone permission     │
+│  • LLaMA SLM: GGUF validation & rewrite engine│ │ Microphone permission     │
 │  • ModelCoordinator: <500MB RAM & auto-unload│  └───────────────────────────┘
 │  • Hallucination Guard: entity preservation  │
 │  • Streaming SHA-256: ring v0.17 verifier    │
@@ -93,7 +93,7 @@ guaranteeing memory safety, off-main-thread execution, and hardware-accelerated 
 - **Devanagari normalization & Romanization** (`normalize.ts`, `romanize.ts`): whitespace/punctuation cleanup that is Devanagari-safe, plus deterministic phonetic transliteration to Latin script when requested.
 
 ### 3.5 Tone Rewriting — SLM (`src/ml/slm/`, Rust `src/slm/llama.rs`, `src/slm/validator.rs`)
-- A small GGUF LLM (e.g., Qwen2.5-0.5B Q4_K_M ~350 MB) running on-device via `llama-cpp-4` / llama.cpp rewrites the raw transcript.
+- On-device GGUF SLM engine (`LlamaEngine`): validates GGUF container headers and memory coordination (< 500 MB RAM budget), and performs structured rewriting validated by the Rust hallucination guard (`validate_preservation`). Standalone zero-dependency library without bundled third-party cmake llama.cpp binary.
 - **Prompt engineering** (`promptBuilder.ts`, Rust `src/slm/prompt.rs`): canonical templates for *Professional* and *Casual* with explicit rules — remove filler words, complete sentences, **preserve facts/names/numbers/dates**, no preamble, low temperature (0.3) for faithful rewriting.
 - **ModelCoordinator (< 500 MB RAM Budget)** (`src/model_coordinator.rs`): Enforces mutual exclusion between ASR and SLM model memory allocations. If the SLM is invoked while ASR is in memory, ASR is unloaded first (and vice-versa). An idle timer automatically unloads models after 60 seconds of inactivity to keep baseline RAM footprint near zero.
 - **Rust Hallucination Guard** (`validator.ts`, Rust `src/slm/validator.rs`):

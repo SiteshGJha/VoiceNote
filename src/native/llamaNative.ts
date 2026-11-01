@@ -115,7 +115,7 @@ export class LlamaNativeBridge {
     await this.loadModel(opts.modelPath);
     this.resetIdleTimer();
 
-    const generationPromise = new Promise<LlamaNativeResult>((resolve, reject) => {
+    const generationPromise = new Promise<LlamaNativeResult>(async (resolve, reject) => {
       try {
         if (this.mockInferenceHook) {
           const res = this.mockInferenceHook(opts);
@@ -126,7 +126,7 @@ export class LlamaNativeBridge {
         const rustCore = getRustCore();
         if (rustCore) {
           try {
-            const res = rustCore.generate(
+            const res = await rustCore.generate(
               opts.prompt,
               opts.modelPath,
               opts.temperature,
