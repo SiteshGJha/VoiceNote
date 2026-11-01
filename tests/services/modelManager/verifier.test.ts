@@ -67,4 +67,27 @@ describe('ModelVerifier', () => {
     const result = await verifyChecksum(tempFilePath, expectedHash);
     expect(result).toBe(true);
   });
+
+  it('falls back to nativeAudio.verifyFileChecksum if mock Rust core returns false', async () => {
+    const { nativeAudio } = require('@/native/nativeAudio');
+    const origAvailable = nativeAudio.isNativeAvailable;
+    const origVerify = nativeAudio.verifyFileChecksum;
+
+    try {
+      Object.defineProperty(nativeAudio, 'isNativeAvailable', { value: true, configurable: true });
+      nativeAudio.verifyFileChecksum = jest.fn().mockResolvedValue(true);
+
+      __setRustCoreInstance({
+        getVersion: () => '0.1.0-mock',
+        verifyFileSha256: () => false, // mock returns false because it cannot read native file
+      });
+
+      const result = await verifyChecksum(tempFilePath, expectedHash);
+      expect(result).toBe(true);
+      expect(nativeAudio.verifyFileChecksum).toHaveBeenCalledWith(tempFilePath, expectedHash);
+    } finally {
+      Object.defineProperty(nativeAudio, 'isNativeAvailable', { value: origAvailable, configurable: true });
+      nativeAudio.verifyFileChecksum = origVerify;
+    }
+  });
 });

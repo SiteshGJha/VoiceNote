@@ -1,2 +1,5 @@
 # CocoaPods
 Pods/
+build/
+voicenote-macOS/main.jsbundle
+voicenote-macOS/main.jsbundle.meta

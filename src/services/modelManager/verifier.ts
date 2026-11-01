@@ -17,16 +17,18 @@ export async function verifyChecksum(filePath: string, expectedSha256: string): 
   try {
     const rustCore = getRustCore();
     if (rustCore && typeof rustCore.verifyFileSha256 === 'function') {
+      const isMock = typeof rustCore.getVersion === 'function' && rustCore.getVersion().includes('mock');
       const match = rustCore.verifyFileSha256(filePath, expectedSha256);
-      if (!match) {
+      if (match) {
+        logger.info('ModelVerifier', `Checksum verified successfully for ${filePath}`);
+        return true;
+      }
+      if (!isMock) {
         logger.warn(
           'ModelVerifier',
-          `Checksum mismatch for ${filePath}. Expected: ${expectedSha256}`
+          `Native Rust core checksum mismatch for ${filePath}. Expected: ${expectedSha256}`
         );
-      } else {
-        logger.info('ModelVerifier', `Checksum verified successfully for ${filePath}`);
       }
-      return match;
     }
   } catch (err) {
     logger.warn('ModelVerifier', 'Rust core checksum verification failed, falling back to stream', err);
@@ -37,6 +39,11 @@ export async function verifyChecksum(filePath: string, expectedSha256: string): 
     try {
       const nativeResult = await nativeAudio.verifyFileChecksum(filePath, expectedSha256);
       if (typeof nativeResult === 'boolean') {
+        if (nativeResult) {
+          logger.info('ModelVerifier', `NativeAudio checksum verified successfully for ${filePath}`);
+        } else {
+          logger.warn('ModelVerifier', `NativeAudio checksum mismatch for ${filePath}. Expected: ${expectedSha256}`);
+        }
         return nativeResult;
       }
     } catch (err) {

@@ -14,7 +14,10 @@ class ModelInstallerService {
   private manifestPath: string;
 
   constructor() {
-    this.modelsDir = path.join(os.homedir(), '.voicenote', 'models');
+    this.modelsDir =
+      process.env.NODE_ENV === 'test'
+        ? path.join(os.tmpdir(), 'voicenote_test_models')
+        : path.join(os.homedir(), '.voicenote', 'models');
     this.manifestPath = path.join(this.modelsDir, 'installed_models.json');
     this.initializeFromStorage();
   }
@@ -37,6 +40,31 @@ class ModelInstallerService {
         let prunedAny = false;
         for (const item of list) {
           if (fs.existsSync(item.localPath)) {
+            // Check if it's a dummy test fixture accidentally persisted from tests
+            let isDummy = false;
+            try {
+              const stat = fs.statSync(item.localPath);
+              if (stat.size < 1000) {
+                const sample = fs.readFileSync(item.localPath, 'utf8');
+                if (typeof sample === 'string' && sample.startsWith('TEST_MODEL_')) {
+                  isDummy = true;
+                }
+              }
+            } catch {
+              // ignore
+            }
+
+            if (isDummy) {
+              prunedAny = true;
+              try {
+                fs.unlinkSync(item.localPath);
+              } catch {
+                // ignore
+              }
+              logger.info('ModelInstaller', `Pruned dummy test model fixture ${item.id} at ${item.localPath}`);
+              continue;
+            }
+
             this.installedModels.set(item.id, item);
             if (item.kind === 'asr') {
               asrModelRegistry.registerInstalledModel(item.id, item.localPath);
