@@ -18,6 +18,12 @@ struct VadEvalResult {
   double probability;
 };
 
+struct AsrNativeResult {
+  std::string text;
+  std::string detectedLang;
+  double durationMs;
+};
+
 class RustCoreHybridObject : public margelo::nitro::HybridObject {
 public:
   RustCoreHybridObject();
@@ -31,6 +37,13 @@ public:
   VadEvalResult evalVad(
     const std::shared_ptr<margelo::nitro::ArrayBuffer>& pcm,
     std::optional<double> sensitivityMode
+  );
+  AsrNativeResult transcribe(
+    const std::shared_ptr<margelo::nitro::ArrayBuffer>& pcm,
+    const std::string& modelPath,
+    std::optional<std::string> language,
+    std::optional<std::string> prompt,
+    std::optional<double> timeoutMs
   );
   void loadHybridMethods() override;
 

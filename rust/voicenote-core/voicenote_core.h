@@ -8,6 +8,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#define SAMPLES_PER_MS 16
+
+#define FRAME_MS 30
+
+#define FRAME_SAMPLES (FRAME_MS * SAMPLES_PER_MS)
+
+#define RMS_SILENCE_THRESHOLD 0.04
+
 /**
  * Default sample rate for VoiceNote audio pipeline (16 kHz).
  */
@@ -70,6 +78,28 @@ enum VnErrorCode
 #ifndef __cplusplus
 typedef int32_t VnErrorCode;
 #endif // __cplusplus
+
+/**
+ * Representation of an ASR transcription result or error across FFI boundaries.
+ */
+typedef struct VnAsrResponse {
+  /**
+   * 0 on success, negative value (`-VnErrorCode`) on error.
+   */
+  int32_t status;
+  /**
+   * Null-terminated UTF-8 transcript string, or null on error.
+   */
+  char *text;
+  /**
+   * Null-terminated UTF-8 language code (e.g. "en", "hi"), or null on error.
+   */
+  char *detected_lang;
+  /**
+   * Elapsed inference duration in milliseconds.
+   */
+  uint64_t duration_ms;
+} VnAsrResponse;
 
 #ifdef __cplusplus
 extern "C" {
@@ -151,6 +181,29 @@ float vn_vad_eval_pcm_chunk(void *vad_handle,
                             const int16_t *pcm_ptr,
                             uintptr_t sample_count,
                             uint8_t sensitivity_mode);
+
+/**
+ * Frees memory associated with a `VnAsrResponse` returned by `vn_asr_transcribe`.
+ *
+ * # Safety
+ * `resp` must be a pointer returned by `vn_asr_transcribe`, or null.
+ */
+void vn_asr_response_free(struct VnAsrResponse *resp);
+
+/**
+ * Transcribes 16-bit linear PCM audio using Whisper.
+ *
+ * # Safety
+ * If `pcm_ptr` is non-null, it must point to at least `sample_count` contiguous `i16` values.
+ * `model_path` must be a valid null-terminated C string if non-null.
+ * `language` and `prompt` may be null or valid null-terminated C strings.
+ */
+struct VnAsrResponse *vn_asr_transcribe(const int16_t *pcm_ptr,
+                                        uintptr_t sample_count,
+                                        const char *model_path,
+                                        const char *language,
+                                        const char *prompt,
+                                        uint64_t timeout_ms);
 
 #ifdef __cplusplus
 }  // extern "C"

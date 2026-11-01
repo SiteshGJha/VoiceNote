@@ -197,3 +197,164 @@ pub unsafe extern "C" fn vn_vad_eval_pcm_chunk(
     }
 }
 
+/// Representation of an ASR transcription result or error across FFI boundaries.
+#[repr(C)]
+pub struct VnAsrResponse {
+    /// 0 on success, negative value (`-VnErrorCode`) on error.
+    pub status: i32,
+    /// Null-terminated UTF-8 transcript string, or null on error.
+    pub text: *mut c_char,
+    /// Null-terminated UTF-8 language code (e.g. "en", "hi"), or null on error.
+    pub detected_lang: *mut c_char,
+    /// Elapsed inference duration in milliseconds.
+    pub duration_ms: u64,
+}
+
+/// Frees memory associated with a `VnAsrResponse` returned by `vn_asr_transcribe`.
+///
+/// # Safety
+/// `resp` must be a pointer returned by `vn_asr_transcribe`, or null.
+#[no_mangle]
+pub unsafe extern "C" fn vn_asr_response_free(resp: *mut VnAsrResponse) {
+    if resp.is_null() {
+        return;
+    }
+    let r = Box::from_raw(resp);
+    if !r.text.is_null() {
+        drop(CString::from_raw(r.text));
+    }
+    if !r.detected_lang.is_null() {
+        drop(CString::from_raw(r.detected_lang));
+    }
+}
+
+/// Transcribes 16-bit linear PCM audio using Whisper.
+///
+/// # Safety
+/// If `pcm_ptr` is non-null, it must point to at least `sample_count` contiguous `i16` values.
+/// `model_path` must be a valid null-terminated C string if non-null.
+/// `language` and `prompt` may be null or valid null-terminated C strings.
+#[no_mangle]
+pub unsafe extern "C" fn vn_asr_transcribe(
+    pcm_ptr: *const i16,
+    sample_count: usize,
+    model_path: *const c_char,
+    language: *const c_char,
+    prompt: *const c_char,
+    timeout_ms: u64,
+) -> *mut VnAsrResponse {
+    // Review Focus 1: Zero-length PCM handed to Rust must return ASR_EMPTY_OUTPUT
+    if pcm_ptr.is_null() || sample_count == 0 {
+        return Box::into_raw(Box::new(VnAsrResponse {
+            status: -(VnErrorCode::AsrEmptyOutput as i32),
+            text: std::ptr::null_mut(),
+            detected_lang: std::ptr::null_mut(),
+            duration_ms: 0,
+        }));
+    }
+
+    if model_path.is_null() {
+        return Box::into_raw(Box::new(VnAsrResponse {
+            status: -(VnErrorCode::AsrModelMissing as i32),
+            text: std::ptr::null_mut(),
+            detected_lang: std::ptr::null_mut(),
+            duration_ms: 0,
+        }));
+    }
+
+    let model_path_str = match std::ffi::CStr::from_ptr(model_path).to_str() {
+        Ok(s) if !s.is_empty() => s,
+        _ => {
+            return Box::into_raw(Box::new(VnAsrResponse {
+                status: -(VnErrorCode::AsrModelMissing as i32),
+                text: std::ptr::null_mut(),
+                detected_lang: std::ptr::null_mut(),
+                duration_ms: 0,
+            }));
+        }
+    };
+
+    let language_opt = if language.is_null() {
+        None
+    } else {
+        match std::ffi::CStr::from_ptr(language).to_str() {
+            Ok(s) if !s.is_empty() => Some(s.to_string()),
+            _ => None,
+        }
+    };
+
+    let prompt_opt = if prompt.is_null() {
+        None
+    } else {
+        match std::ffi::CStr::from_ptr(prompt).to_str() {
+            Ok(s) if !s.is_empty() => Some(s.to_string()),
+            _ => None,
+        }
+    };
+
+    let pcm_slice = std::slice::from_raw_parts(pcm_ptr, sample_count);
+    let pcm_f32: Vec<f32> = pcm_slice.iter().map(|&x| x as f32 / 32768.0).collect();
+    let timeout = if timeout_ms == 0 { 30_000 } else { timeout_ms };
+
+    let model_path_owned = model_path_str.to_string();
+
+    let execute_transcribe = move || -> Result<(AsrOutput, u64), VnError> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| {
+                VnError::new(
+                    VnErrorCode::Unknown,
+                    format!("Failed to create tokio runtime: {:?}", e),
+                )
+            })?;
+
+        let start = std::time::Instant::now();
+        let fut = async {
+            let engine = WhisperEngine::load(std::path::Path::new(&model_path_owned)).await?;
+            let output = engine
+                .transcribe(
+                    &pcm_f32,
+                    language_opt.as_deref(),
+                    prompt_opt.as_deref(),
+                    timeout,
+                )
+                .await?;
+            Ok::<AsrOutput, VnError>(output)
+        };
+
+        let output = rt.block_on(fut)?;
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok((output, elapsed))
+    };
+
+    let res = if tokio::runtime::Handle::try_current().is_ok() {
+        match std::thread::spawn(execute_transcribe).join() {
+            Ok(r) => r,
+            Err(_) => Err(VnError::new(VnErrorCode::Unknown, "Thread panic in transcribe")),
+        }
+    } else {
+        execute_transcribe()
+    };
+
+    match res {
+        Ok((output, elapsed)) => {
+            let text_c = CString::new(output.text).unwrap_or_else(|_| CString::new("").unwrap());
+            let lang_c =
+                CString::new(output.detected_lang).unwrap_or_else(|_| CString::new("en").unwrap());
+            Box::into_raw(Box::new(VnAsrResponse {
+                status: 0,
+                text: text_c.into_raw(),
+                detected_lang: lang_c.into_raw(),
+                duration_ms: elapsed,
+            }))
+        }
+        Err(err) => Box::into_raw(Box::new(VnAsrResponse {
+            status: -(err.code() as i32),
+            text: std::ptr::null_mut(),
+            detected_lang: std::ptr::null_mut(),
+            duration_ms: 0,
+        })),
+    }
+}
+

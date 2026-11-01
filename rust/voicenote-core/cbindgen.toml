@@ -9,4 +9,4 @@ rename_variants = "None"
 prefix_with_name = false
 
 [export]
-include = ["VnErrorCode"]
+include = ["VnErrorCode", "VnAsrResponse"]

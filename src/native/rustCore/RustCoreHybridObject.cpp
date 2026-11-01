@@ -47,6 +47,30 @@ struct JSIConverter<voicenote::VadEvalResult> final {
     return obj.hasProperty(runtime, "isSpeech") && obj.hasProperty(runtime, "probability");
   }
 };
+
+template <>
+struct JSIConverter<voicenote::AsrNativeResult> final {
+  static inline voicenote::AsrNativeResult fromJSI(jsi::Runtime& runtime, const jsi::Value& arg) {
+    jsi::Object obj = arg.asObject(runtime);
+    return voicenote::AsrNativeResult {
+      obj.getProperty(runtime, "text").asString(runtime).utf8(runtime),
+      obj.getProperty(runtime, "detectedLang").asString(runtime).utf8(runtime),
+      obj.getProperty(runtime, "durationMs").asNumber()
+    };
+  }
+  static inline jsi::Value toJSI(jsi::Runtime& runtime, const voicenote::AsrNativeResult& result) {
+    jsi::Object obj(runtime);
+    obj.setProperty(runtime, "text", jsi::String::createFromUtf8(runtime, result.text));
+    obj.setProperty(runtime, "detectedLang", jsi::String::createFromUtf8(runtime, result.detectedLang));
+    obj.setProperty(runtime, "durationMs", jsi::Value(result.durationMs));
+    return obj;
+  }
+  static inline bool canConvert(jsi::Runtime& runtime, const jsi::Value& value) {
+    if (!value.isObject()) return false;
+    jsi::Object obj = value.getObject(runtime);
+    return obj.hasProperty(runtime, "text") && obj.hasProperty(runtime, "detectedLang") && obj.hasProperty(runtime, "durationMs");
+  }
+};
 } // namespace margelo::nitro
 
 namespace voicenote {
@@ -120,12 +144,71 @@ VadEvalResult RustCoreHybridObject::evalVad(
   return VadEvalResult { isSpeech, static_cast<double>(prob) };
 }
 
+AsrNativeResult RustCoreHybridObject::transcribe(
+  const std::shared_ptr<margelo::nitro::ArrayBuffer>& pcm,
+  const std::string& modelPath,
+  std::optional<std::string> language,
+  std::optional<std::string> prompt,
+  std::optional<double> timeoutMs
+) {
+  const int16_t* pcm_ptr = (pcm && pcm->size() > 0) ? reinterpret_cast<const int16_t*>(pcm->data()) : nullptr;
+  uintptr_t sample_count = (pcm && pcm->size() > 0) ? (pcm->size() / sizeof(int16_t)) : 0;
+  const char* lang_cstr = (language.has_value() && !language.value().empty()) ? language.value().c_str() : nullptr;
+  const char* prompt_cstr = (prompt.has_value() && !prompt.value().empty()) ? prompt.value().c_str() : nullptr;
+  uint64_t timeout = (timeoutMs.has_value() && timeoutMs.value() > 0) ? static_cast<uint64_t>(timeoutMs.value()) : 30000;
+
+  VnAsrResponse* resp = vn_asr_transcribe(
+    pcm_ptr,
+    sample_count,
+    modelPath.c_str(),
+    lang_cstr,
+    prompt_cstr,
+    timeout
+  );
+
+  if (!resp) {
+    throw std::runtime_error("UNKNOWN: vn_asr_transcribe returned null");
+  }
+
+  int32_t status = resp->status;
+  if (status < 0) {
+    int32_t code = -status;
+    std::string errCodeStr = "UNKNOWN";
+    switch (code) {
+      case AsrEmptyOutput: errCodeStr = "ASR_EMPTY_OUTPUT"; break;
+      case AsrTimeout: errCodeStr = "ASR_TIMEOUT"; break;
+      case AsrModelMissing: errCodeStr = "ASR_MODEL_MISSING"; break;
+      case SlmTimeout: errCodeStr = "SLM_TIMEOUT"; break;
+      case SlmHallucinationSuspected: errCodeStr = "SLM_HALLUCINATION_SUSPECTED"; break;
+      case ModelChecksumFailed: errCodeStr = "MODEL_CHECKSUM_FAILED"; break;
+      case AudioRecordFailed: errCodeStr = "AUDIO_RECORD_FAILED"; break;
+      case VadNoSpeech: errCodeStr = "VAD_NO_SPEECH"; break;
+      case SegmentMergeFailed: errCodeStr = "SEGMENT_MERGE_FAILED"; break;
+      case RecordingLimitReached: errCodeStr = "RECORDING_LIMIT_REACHED"; break;
+      case HardwareTriggerDenied: errCodeStr = "HARDWARE_TRIGGER_DENIED"; break;
+      case StorageFull: errCodeStr = "STORAGE_FULL"; break;
+      default: errCodeStr = "UNKNOWN"; break;
+    }
+    vn_asr_response_free(resp);
+    throw std::runtime_error(errCodeStr);
+  }
+
+  std::string text = resp->text ? resp->text : "";
+  std::string detectedLang = resp->detected_lang ? resp->detected_lang : "en";
+  double duration = static_cast<double>(resp->duration_ms);
+
+  vn_asr_response_free(resp);
+
+  return AsrNativeResult { text, detectedLang, duration };
+}
+
 void RustCoreHybridObject::loadHybridMethods() {
   HybridObject::loadHybridMethods();
   registerHybrids(this, [](Prototype& prototype) {
     prototype.registerHybridMethod("getVersion", &RustCoreHybridObject::getVersion);
     prototype.registerHybridMethod("trimAndSaveWav", &RustCoreHybridObject::trimAndSaveWav);
     prototype.registerHybridMethod("evalVad", &RustCoreHybridObject::evalVad);
+    prototype.registerHybridMethod("transcribe", &RustCoreHybridObject::transcribe);
   });
 }
 } // namespace voicenote

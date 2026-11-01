@@ -37,6 +37,15 @@ describe('WhisperNativeBridge', () => {
     ).rejects.toThrow(/Audio file does not exist/);
   });
 
+  test('transcribing empty audio URI returns ASR_EMPTY_OUTPUT', async () => {
+    await expect(
+      whisperNative.transcribe({
+        audioUri: '/mock/empty.wav',
+        modelPath: '/mock/model.bin',
+      })
+    ).rejects.toMatchObject({ code: 'ASR_EMPTY_OUTPUT' });
+  });
+
   it('enforces timeout guard when inference exceeds timeoutMs', async () => {
     whisperNative.setMockInferenceHook(() => {
       // Simulate hanging inference

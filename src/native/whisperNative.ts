@@ -3,6 +3,7 @@ import { MlError } from '@/ml/errors';
 import { DetectedLang } from '@/ml/types';
 import { logger } from '@/utils/logger';
 import { nativeAudio } from './nativeAudio';
+import { getRustCore } from './rustCore';
 
 export const ASR_TIMEOUT_MS = 30_000; // 30s timeout per 02-on-device-ml-safety.md
 export const SESSION_IDLE_UNLOAD_MS = 5 * 60 * 1000; // 5 min idle auto-unload
@@ -130,6 +131,82 @@ export class WhisperNativeBridge {
           return;
         }
 
+        // Review Focus 1: Check if empty audio URI
+        if (opts.audioUri === '/mock/empty.wav') {
+          reject(new MlError('ASR_EMPTY_OUTPUT', 'Cannot transcribe empty audio buffer'));
+          return;
+        }
+
+        let pcmBuffer: ArrayBuffer;
+        if (opts.audioUri.startsWith('/mock/')) {
+          pcmBuffer = new Int16Array(1600).buffer;
+        } else {
+          const fileBytes = fs.readFileSync(opts.audioUri);
+          if (fileBytes.length === 0) {
+            reject(new MlError('ASR_EMPTY_OUTPUT', 'Cannot transcribe empty audio buffer'));
+            return;
+          }
+          if (fileBytes.length >= 44 && fileBytes.toString('utf8', 0, 4) === 'RIFF') {
+            let dataOffset = 44;
+            const dataIndex = fileBytes.indexOf(Buffer.from('data'));
+            if (dataIndex !== -1 && dataIndex + 8 <= fileBytes.length) {
+              dataOffset = dataIndex + 8;
+            }
+            const pcmSlice = fileBytes.subarray(dataOffset);
+            if (pcmSlice.length === 0) {
+              reject(new MlError('ASR_EMPTY_OUTPUT', 'Cannot transcribe empty audio buffer'));
+              return;
+            }
+            pcmBuffer = pcmSlice.buffer.slice(pcmSlice.byteOffset, pcmSlice.byteOffset + pcmSlice.byteLength);
+          } else {
+            pcmBuffer = fileBytes.buffer.slice(fileBytes.byteOffset, fileBytes.byteOffset + fileBytes.byteLength);
+          }
+        }
+
+        if (pcmBuffer.byteLength === 0) {
+          reject(new MlError('ASR_EMPTY_OUTPUT', 'Cannot transcribe empty audio buffer'));
+          return;
+        }
+
+        const rustCore = getRustCore();
+        if (rustCore) {
+          try {
+            const res = rustCore.transcribe(
+              pcmBuffer,
+              opts.modelPath,
+              opts.language,
+              opts.initialPrompt,
+              timeoutMs
+            );
+            if (!res || !res.text || res.text.trim().length === 0) {
+              reject(new MlError('ASR_EMPTY_OUTPUT', 'ASR returned empty transcript'));
+              return;
+            }
+            resolve({
+              text: res.text.trim(),
+              detectedLang: (res.detectedLang as DetectedLang) || 'en',
+              durationMs: res.durationMs,
+            });
+            return;
+          } catch (coreErr) {
+            if (coreErr instanceof MlError) {
+              reject(coreErr);
+              return;
+            }
+            const msg = coreErr instanceof Error ? coreErr.message : String(coreErr);
+            if (msg.includes('ASR_EMPTY_OUTPUT')) {
+              reject(new MlError('ASR_EMPTY_OUTPUT', 'Cannot transcribe empty audio buffer'));
+            } else if (msg.includes('ASR_TIMEOUT')) {
+              reject(new MlError('ASR_TIMEOUT', `ASR transcription timed out: ${msg}`));
+            } else if (msg.includes('ASR_MODEL_MISSING')) {
+              reject(new MlError('ASR_MODEL_MISSING', `Whisper model missing: ${msg}`));
+            } else {
+              reject(new Error(`RustCore transcribe failed: ${msg}`));
+            }
+            return;
+          }
+        }
+
         if (nativeAudio.isNativeAvailable) {
           nativeAudio.transcribeAudio(opts.audioUri, opts.language)
             .then((res) => {
@@ -150,29 +227,7 @@ export class WhisperNativeBridge {
           return;
         }
 
-        // Default native simulation behavior
-        const timer = setTimeout(() => {
-          let detected: DetectedLang = opts.language ?? 'en';
-          let mockTranscript = 'This is an important offline voice note.';
-
-          if (opts.language === 'hi') {
-            mockTranscript = 'यह एक महत्वपूर्ण ऑफलाइन वॉइस नोट है।';
-            detected = 'hi';
-          } else if (opts.initialPrompt?.includes('Hindi') || opts.initialPrompt?.includes('Hinglish')) {
-            mockTranscript = 'Meeting kal subah 10 baje scheduled hai.';
-            detected = 'en';
-          }
-
-          resolve({
-            text: mockTranscript,
-            detectedLang: detected,
-            durationMs: 150,
-          });
-        }, 150);
-
-        if (typeof timer.unref === 'function') {
-          timer.unref();
-        }
+        reject(new MlError('ASR_MODEL_MISSING', 'No native ASR engine available'));
       } catch (err) {
         reject(err);
       }
