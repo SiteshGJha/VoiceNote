@@ -1,5 +1,6 @@
 pub mod asr;
 pub mod audio;
+pub mod crypto;
 pub mod errors;
 pub mod model_coordinator;
 pub mod slm;
@@ -9,6 +10,7 @@ pub use asr::{AsrOutput, WhisperEngine};
 pub use audio::{
     trim_silence, trim_silence_with_rate, wrap_pcm_with_wav_header, AudioBuffer, TrimResult,
 };
+pub use crypto::verify_file_sha256;
 pub use errors::{VnError, VnErrorCode};
 pub use model_coordinator::{ActiveModel, ModelCoordinator};
 pub use slm::LlamaEngine;
@@ -495,5 +497,45 @@ pub unsafe extern "C" fn vn_slm_generate(
         })),
     }
 }
+
+/// Verifies the SHA-256 digest of a local file against an expected hexadecimal digest string.
+///
+/// # Arguments
+/// * `file_path` - Null-terminated UTF-8 C string pointing to the file to verify.
+/// * `expected_hex` - Null-terminated UTF-8 C string containing the expected 64-character SHA-256 hex digest.
+///
+/// # Returns
+/// - `1` if the digest matches.
+/// - `0` if the digest does not match.
+/// - Negative integer (`-VnErrorCode`) if arguments are invalid or an error occurred during read.
+///
+/// # Safety
+/// Both `file_path` and `expected_hex` must be valid, null-terminated C strings.
+#[no_mangle]
+pub unsafe extern "C" fn vn_crypto_verify_sha256(
+    file_path: *const c_char,
+    expected_hex: *const c_char,
+) -> i32 {
+    if file_path.is_null() || expected_hex.is_null() {
+        return -(VnErrorCode::Unknown as i32);
+    }
+
+    let path_str = match std::ffi::CStr::from_ptr(file_path).to_str() {
+        Ok(s) if !s.is_empty() => s,
+        _ => return -(VnErrorCode::Unknown as i32),
+    };
+
+    let hex_str = match std::ffi::CStr::from_ptr(expected_hex).to_str() {
+        Ok(s) if !s.is_empty() => s,
+        _ => return -(VnErrorCode::Unknown as i32),
+    };
+
+    match crypto::verify_file_sha256(std::path::Path::new(path_str), hex_str) {
+        Ok(true) => 1,
+        Ok(false) => 0,
+        Err(e) => -(e.code() as i32),
+    }
+}
+
 
 

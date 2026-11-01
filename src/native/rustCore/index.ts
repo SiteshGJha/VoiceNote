@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import { IRustCoreHybridObject } from './types';
 import { trimSilence } from '@/audio/silenceTrim';
@@ -121,6 +122,18 @@ function createDefaultMockInstance(): IRustCoreHybridObject {
         text: rewritten,
         durationMs: 150,
       };
+    },
+    verifyFileSha256: (filePath: string, expectedHex: string): boolean => {
+      if (!fs.existsSync(filePath)) {
+        return false;
+      }
+      try {
+        const fileBuffer = fs.readFileSync(filePath);
+        const actualHex = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+        return actualHex.toLowerCase() === expectedHex.trim().toLowerCase();
+      } catch {
+        return false;
+      }
     },
   };
 }

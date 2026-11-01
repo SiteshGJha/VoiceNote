@@ -249,6 +249,24 @@ struct VnSlmResponse *vn_slm_generate(const char *prompt,
                                       uint32_t max_tokens,
                                       uint64_t timeout_ms);
 
+/**
+ * Verifies the SHA-256 digest of a local file against an expected hexadecimal digest string.
+ *
+ * # Arguments
+ * * `file_path` - Null-terminated UTF-8 C string pointing to the file to verify.
+ * * `expected_hex` - Null-terminated UTF-8 C string containing the expected 64-character SHA-256 hex digest.
+ *
+ * # Returns
+ * - `1` if the digest matches.
+ * - `0` if the digest does not match.
+ * - Negative integer (`-VnErrorCode`) if arguments are invalid or an error occurred during read.
+ *
+ * # Safety
+ * Both `file_path` and `expected_hex` must be valid, null-terminated C strings.
+ */
+int32_t vn_crypto_verify_sha256(const char *file_path,
+                                const char *expected_hex);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

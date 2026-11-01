@@ -281,6 +281,11 @@ SlmNativeResult RustCoreHybridObject::generate(
   return SlmNativeResult { text, duration };
 }
 
+bool RustCoreHybridObject::verifyFileSha256(const std::string& filePath, const std::string& expectedHex) {
+  int32_t status = vn_crypto_verify_sha256(filePath.c_str(), expectedHex.c_str());
+  return status == 1;
+}
+
 void RustCoreHybridObject::loadHybridMethods() {
   HybridObject::loadHybridMethods();
   registerHybrids(this, [](Prototype& prototype) {
@@ -289,6 +294,7 @@ void RustCoreHybridObject::loadHybridMethods() {
     prototype.registerHybridMethod("evalVad", &RustCoreHybridObject::evalVad);
     prototype.registerHybridMethod("transcribe", &RustCoreHybridObject::transcribe);
     prototype.registerHybridMethod("generate", &RustCoreHybridObject::generate);
+    prototype.registerHybridMethod("verifyFileSha256", &RustCoreHybridObject::verifyFileSha256);
   });
 }
 } // namespace voicenote

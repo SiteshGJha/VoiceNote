@@ -58,6 +58,7 @@ public:
     std::optional<double> maxTokens,
     std::optional<double> timeoutMs
   );
+  bool verifyFileSha256(const std::string& filePath, const std::string& expectedHex);
   void loadHybridMethods() override;
 
 private:

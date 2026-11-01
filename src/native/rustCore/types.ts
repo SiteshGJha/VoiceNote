@@ -33,4 +33,5 @@ export interface IRustCoreHybridObject {
     maxTokens?: number,
     timeoutMs?: number
   ): SlmNativeResult;
+  verifyFileSha256(filePath: string, expectedHex: string): boolean;
 }
