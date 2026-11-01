@@ -83,4 +83,33 @@ describe('Native Module Smoke Test', () => {
     const rustCore = getRustCore();
     expect(rustCore?.getVersion()).toBe('0.1.0-mock');
   });
+
+  it('smoke test returns fail and status returns unavailable when getVersion throws', () => {
+    __setRustCoreInstance({
+      getVersion: () => {
+        throw new Error('Native crash');
+      },
+    });
+
+    expect(__smokeTest()).toBe('fail');
+    const status = getNativeBridgeStatus();
+    expect(status.status).toBe('unavailable');
+    expect(status.isNitroAvailable).toBe(false);
+    expect(status.isAudioEngineReady).toBe(false);
+    expect(status.isAsrBridgeReady).toBe(false);
+    expect(status.isSlmBridgeReady).toBe(false);
+    expect(status.rustCoreVersion).toBe('unavailable');
+  });
+
+  it('smoke test returns fail and status returns unavailable when version is unavailable', () => {
+    __setRustCoreInstance({
+      getVersion: () => 'unavailable',
+    });
+
+    expect(__smokeTest()).toBe('fail');
+    const status = getNativeBridgeStatus();
+    expect(status.status).toBe('unavailable');
+    expect(status.isNitroAvailable).toBe(false);
+    expect(status.rustCoreVersion).toBe('unavailable');
+  });
 });

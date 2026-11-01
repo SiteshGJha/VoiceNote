@@ -3,6 +3,8 @@ import { logger } from '@/utils/logger';
 import { calculateRms, SAMPLE_RATE, BYTES_PER_SAMPLE } from '@/audio/wavUtils';
 import { AudioMeteringData } from '@/audio/types';
 
+declare const __DEV__: boolean | undefined;
+
 export type WorkerFrameListener = (chunk: Uint8Array, metering: AudioMeteringData) => void;
 
 export interface AudioWorkerConfig {
@@ -55,6 +57,11 @@ export class BackgroundAudioWorker {
       return;
     }
 
+    const isDevOrTest = (typeof __DEV__ !== 'undefined' && __DEV__) || process.env.NODE_ENV === 'test';
+    if (!isDevOrTest) {
+      throw new Error('AudioWorker simulation is not permitted in production release builds. Use native audio capture.');
+    }
+
     this.isCapturing = true;
     logger.info(
       'AudioWorker',
@@ -104,6 +111,11 @@ export class BackgroundAudioWorker {
   }
 
   private startCaptureSimulation(): void {
+    const isDevOrTest = (typeof __DEV__ !== 'undefined' && __DEV__) || process.env.NODE_ENV === 'test';
+    if (!isDevOrTest) {
+      throw new Error('AudioWorker simulation is not permitted in production release builds. Use native audio capture.');
+    }
+
     this.timer = setInterval(() => {
       if (!this.isCapturing) {
         return;

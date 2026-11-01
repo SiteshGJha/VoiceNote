@@ -47,4 +47,28 @@ describe('BackgroundAudioWorker', () => {
 
     await worker.stopCapture();
   });
+
+  it('rejects capture simulation in production release builds', async () => {
+    const originalEnv = process.env.NODE_ENV;
+    const globalAny = globalThis as Record<string, unknown>;
+    const originalDev = globalAny.__DEV__;
+
+    try {
+      process.env.NODE_ENV = 'production';
+      globalAny.__DEV__ = false;
+
+      const worker = new BackgroundAudioWorker({ sampleRate: 16000, frameMs: 30, channels: 1 });
+      await expect(worker.startCapture()).rejects.toThrow(
+        'AudioWorker simulation is not permitted in production release builds. Use native audio capture.'
+      );
+      expect(worker.isRunning()).toBe(false);
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+      if (originalDev === undefined) {
+        delete globalAny.__DEV__;
+      } else {
+        globalAny.__DEV__ = originalDev;
+      }
+    }
+  });
 });

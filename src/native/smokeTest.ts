@@ -16,8 +16,12 @@ export interface NativeBridgeStatus {
  */
 export function __smokeTest(): 'ok' | 'fail' {
   try {
-    // In production, verifies Nitro JSI bindings
-    return 'ok';
+    const rustCore = getRustCore();
+    const version = rustCore?.getVersion();
+    if (typeof version === 'string' && version.length > 0 && version !== 'unavailable') {
+      return 'ok';
+    }
+    return 'fail';
   } catch (error) {
     logger.error('NativeSmokeTest', 'Smoke test failed', error);
     return 'fail';
@@ -25,15 +29,28 @@ export function __smokeTest(): 'ok' | 'fail' {
 }
 
 export function getNativeBridgeStatus(): NativeBridgeStatus {
-  const rustCore = getRustCore();
-  const rustCoreVersion = rustCore ? rustCore.getVersion() : 'unavailable';
+  try {
+    const rustCore = getRustCore();
+    const version = rustCore ? rustCore.getVersion() : 'unavailable';
+    const isReady = !!rustCore && typeof version === 'string' && version !== 'unavailable' && version.length > 0;
 
-  return {
-    isNitroAvailable: true,
-    isAudioEngineReady: true,
-    isAsrBridgeReady: true,
-    isSlmBridgeReady: true,
-    rustCoreVersion,
-    status: 'ok',
-  };
+    return {
+      isNitroAvailable: isReady,
+      isAudioEngineReady: isReady,
+      isAsrBridgeReady: isReady,
+      isSlmBridgeReady: isReady,
+      rustCoreVersion: version,
+      status: isReady ? 'ok' : 'unavailable',
+    };
+  } catch (error) {
+    logger.error('NativeSmokeTest', 'Failed to get native bridge status', error);
+    return {
+      isNitroAvailable: false,
+      isAudioEngineReady: false,
+      isAsrBridgeReady: false,
+      isSlmBridgeReady: false,
+      rustCoreVersion: 'unavailable',
+      status: 'unavailable',
+    };
+  }
 }
