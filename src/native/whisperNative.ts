@@ -137,11 +137,48 @@ export class WhisperNativeBridge {
           return;
         }
 
+        // 1. Primary device transcription bridge (e.g. macOS SFSpeechRecognizer / iOS Speech)
+        if (nativeAudio.isNativeAvailable) {
+          try {
+            const res = await nativeAudio.transcribeAudio(opts.audioUri, opts.language);
+            if (!res || !res.text || res.text.trim().length === 0) {
+              reject(new MlError('ASR_EMPTY_OUTPUT', 'ASR returned empty transcript'));
+              return;
+            }
+            resolve({
+              text: res.text.trim(),
+              detectedLang: (res.detectedLang as DetectedLang) || 'en',
+              durationMs: res.durationMs,
+            });
+            return;
+          } catch (err) {
+            logger.error('WhisperNative', 'Native ASR failed', err);
+            if (err instanceof MlError) {
+              reject(err);
+              return;
+            }
+            reject(
+              new MlError(
+                'ASR_TIMEOUT',
+                `Native ASR failed: ${err instanceof Error ? err.message : String(err)}`
+              )
+            );
+            return;
+          }
+        }
+
+        // 2. Secondary / RustCore / Test runner path via PCM buffer
         let pcmBuffer: ArrayBuffer;
         if (opts.audioUri.startsWith('/mock/')) {
           pcmBuffer = new Int16Array(1600).buffer;
         } else {
-          const fileBytes = fs.readFileSync(opts.audioUri);
+          let rawBytes: Buffer | Uint8Array;
+          try {
+            rawBytes = fs.readFileSync(opts.audioUri);
+          } catch {
+            rawBytes = Buffer.alloc(0);
+          }
+          const fileBytes = Buffer.isBuffer(rawBytes) ? rawBytes : Buffer.from(rawBytes);
           if (fileBytes.length === 0) {
             reject(new MlError('ASR_EMPTY_OUTPUT', 'Cannot transcribe empty audio buffer'));
             return;
@@ -157,9 +194,9 @@ export class WhisperNativeBridge {
               reject(new MlError('ASR_EMPTY_OUTPUT', 'Cannot transcribe empty audio buffer'));
               return;
             }
-            pcmBuffer = pcmSlice.buffer.slice(pcmSlice.byteOffset, pcmSlice.byteOffset + pcmSlice.byteLength);
+            pcmBuffer = pcmSlice.buffer.slice(pcmSlice.byteOffset, pcmSlice.byteOffset + pcmSlice.byteLength) as ArrayBuffer;
           } else {
-            pcmBuffer = fileBytes.buffer.slice(fileBytes.byteOffset, fileBytes.byteOffset + fileBytes.byteLength);
+            pcmBuffer = fileBytes.buffer.slice(fileBytes.byteOffset, fileBytes.byteOffset + fileBytes.byteLength) as ArrayBuffer;
           }
         }
 
@@ -205,26 +242,6 @@ export class WhisperNativeBridge {
             }
             return;
           }
-        }
-
-        if (nativeAudio.isNativeAvailable) {
-          nativeAudio.transcribeAudio(opts.audioUri, opts.language)
-            .then((res) => {
-              if (!res || !res.text || res.text.trim().length === 0) {
-                reject(new MlError('ASR_EMPTY_OUTPUT', 'ASR returned empty transcript'));
-                return;
-              }
-              resolve({
-                text: res.text.trim(),
-                detectedLang: res.detectedLang as DetectedLang,
-                durationMs: res.durationMs,
-              });
-            })
-            .catch((err) => {
-              logger.error('WhisperNative', 'Native ASR failed', err);
-              reject(new MlError('ASR_TIMEOUT', `Native ASR failed: ${err instanceof Error ? err.message : String(err)}`));
-            });
-          return;
         }
 
         reject(new MlError('ASR_MODEL_MISSING', 'No native ASR engine available'));

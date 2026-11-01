@@ -68,4 +68,32 @@ describe('WhisperNativeBridge', () => {
       }
     }
   });
+
+  it('delegates to nativeAudio.transcribeAudio when nativeAudio is available', async () => {
+    const { nativeAudio } = require('@/native/nativeAudio');
+    const origAvailable = nativeAudio.isNativeAvailable;
+    const origTranscribe = nativeAudio.transcribeAudio;
+
+    try {
+      Object.defineProperty(nativeAudio, 'isNativeAvailable', { value: true, configurable: true });
+      nativeAudio.transcribeAudio = jest.fn().mockResolvedValue({
+        text: 'Transcribed from native speech engine',
+        detectedLang: 'en',
+        durationMs: 120,
+      });
+
+      const res = await whisperNative.transcribe({
+        audioUri: '/mock/speech.wav',
+        modelPath: '/mock/model.bin',
+        language: 'en',
+      });
+
+      expect(res.text).toBe('Transcribed from native speech engine');
+      expect(res.detectedLang).toBe('en');
+      expect(nativeAudio.transcribeAudio).toHaveBeenCalledWith('/mock/speech.wav', 'en');
+    } finally {
+      Object.defineProperty(nativeAudio, 'isNativeAvailable', { value: origAvailable, configurable: true });
+      nativeAudio.transcribeAudio = origTranscribe;
+    }
+  });
 });
