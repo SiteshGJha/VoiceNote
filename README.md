@@ -16,6 +16,8 @@ Powered by a unified, memory-safe native Rust engine (**`voicenote-core`**) inte
 - **Asynchronous JSI ThreadPool:** Nitro Modules 0.18 C++ bridge (`RustCoreHybridObject`) offloads heavy inference to background threads, guaranteeing 60 fps UI responsiveness without freezing animations or waveforms.
 - **On-Device Whisper ASR:** Local speech recognition via `whisper-rs` (whisper.cpp) with Apple Silicon Metal acceleration, compile-time CoreML validation on iOS, and Hinglish script steering.
 - **Long-Audio Silence Segmentation:** Recordings longer than 27s are segmented at natural silence boundaries to prevent Whisper's 30s window cutoff.
+- **5-Minute Live Rolling Whisper Engine:** Continuous capture up to 300s with silence-boundary chunking (20–25s slices), FIFO background Whisper worker, and sequential semantic paragraph SLM rewriting (150–200 words).
+- **Standalone Packaging Pipelines (< 80 MB):** Universal macOS `.dmg` installer (`lipo` universal binary + inside-out codesigning) and standalone signed Android `.apk` (React Native 0.76 Gradle/NDK scaffolding + JNI bridge) enforcing an 80 MB ceiling with zero bundled model weights.
 - **On-Device SLM Tone Rewriting:** On-device GGUF SLM engine rewriting raw transcripts into Professional or Casual tones.
 - **Hallucination Guard in Rust:** Entity preservation regex engine checking numbers, dates, times, currencies, and proper nouns with [0.35×, 2.5×] length bounds.
 - **Memory Protection & Mutual Exclusion:** `ModelCoordinator` keeps peak RAM strictly **< 500 MB** by guaranteeing Whisper and LLaMA are never concurrently resident, with a 60-second idle auto-unload timer.
@@ -109,7 +111,7 @@ bash scripts/build-ios.sh
 bash scripts/build-android.sh
 ```
 
-## Running the App
+## Running the App in Development
 
 - **macOS Desktop**:
   ```bash
@@ -124,6 +126,34 @@ bash scripts/build-android.sh
   npm run android
   ```
 
+## Standalone Production Packaging (< 80 MB)
+
+VoiceNote provides headless, automated release packaging pipelines to compile, bundle, and distribute standalone installers without an active Metro server:
+
+- **macOS Universal DMG** (Universal Apple Silicon & Intel `arm64` + `x86_64`):
+  ```bash
+  npm run build:macos:dmg
+  ```
+  Generates `dist/VoiceNote-1.0.0.dmg`. Includes inside-out ad-hoc codesigning and drag-and-drop `/Applications` staging.
+
+- **Android Standalone Release APK** (Targeting `arm64-v8a` API 29+):
+  ```bash
+  npm run build:android:release
+  ```
+  Generates `dist/VoiceNote-1.0.0-arm64-v8a.apk` with bundled offline JS, compiled JNI, and dynamic signature verification.
+
+- **Generate Developer Keystore**:
+  ```bash
+  npm run generate:android:keystore
+  ```
+
+- **Build All Release Artifacts**:
+  ```bash
+  npm run build:all
+  ```
+
+For detailed toolchain setup, Gatekeeper bypass (`xattr -cr`), and Android sideloading instructions, see [`docs/PACKAGING.md`](docs/PACKAGING.md).
+
 ## Verification & Quality Checks
 
 VoiceNote enforces a strict zero-regression testing protocol:
@@ -132,9 +162,13 @@ VoiceNote enforces a strict zero-regression testing protocol:
   ```bash
   cargo test --manifest-path rust/Cargo.toml
   ```
-- **TypeScript & Jest Test Suite** (204 tests across 40 test suites):
+- **TypeScript & Jest Test Suite** (280 tests across 50 test suites):
   ```bash
   npm test
+  ```
+- **Standalone Packaging Sanity Suite** (33 tests):
+  ```bash
+  npm test tests/native/packagingSanity.test.ts
   ```
 - **TypeScript Strict Type Checking** (0 errors):
   ```bash
@@ -152,6 +186,7 @@ VoiceNote enforces a strict zero-regression testing protocol:
 2. **Zero Telemetry / Analytics**: No crash reporters, performance trackers, or analytics SDKs.
 3. **Strict Audio Ephemerality**: Temporary audio files are managed via Rust RAII `Drop` and deleted immediately after transcription, even on failure.
 4. **Memory Budget**: Peak RAM remains strictly **< 500 MB** enforced via `ModelCoordinator` mutual exclusion.
-5. **Off-Main-Thread Execution**: All heavy ML inference runs asynchronously on Nitro's background `ThreadPool` off the React Native UI thread.
+5. **On-Demand Model Provisioning**: Installers remain strictly **< 80 MB**; model weights are never bundled into application assets and must be downloaded post-install with explicit user consent.
+6. **Off-Main-Thread Execution**: All heavy ML inference runs asynchronously on Nitro's background `ThreadPool` off the React Native UI thread.
 
-For deeper context, see [`docs/PRD.md`](docs/PRD.md), [`docs/TECHNICAL_GUIDE.md`](docs/TECHNICAL_GUIDE.md), and [`rust/README.md`](rust/README.md).
+For deeper context, see [`docs/PRD.md`](docs/PRD.md), [`docs/PACKAGING.md`](docs/PACKAGING.md), [`docs/TECHNICAL_GUIDE.md`](docs/TECHNICAL_GUIDE.md), [`docs/designs/`](docs/designs/), and [`rust/README.md`](rust/README.md).

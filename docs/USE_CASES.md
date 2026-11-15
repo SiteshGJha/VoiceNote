@@ -104,6 +104,10 @@ Home → Settings → Privacy
 | UC-28 | Handle microphone permission | `HomeScreen.tsx:224`, `PermissionGate.tsx` | User + OS |
 | UC-29 | Pipeline error handling & SLM fallback | `orchestrator.ts:38`, `60`, `93` | System |
 | UC-30 | App startup, smoke test, theming | `App.tsx:13` | System |
+| UC-31 | First-run model provisioning modal | `FirstRunSetupModal.tsx`, `App.tsx` | User + System |
+| UC-32 | 5-Minute continuous dictation (Rolling Whisper & Paragraph SLM) | `HomeScreen.tsx`, `rollingRecorder.ts`, `rollingAsrWorker.ts`, `paragraphRewriter.ts` | User + System |
+| UC-33 | Standalone macOS DMG installation & Gatekeeper bypass | `dist/VoiceNote-1.0.0.dmg`, `scripts/build-macos-dmg.sh` | User + OS |
+| UC-34 | Standalone Android APK sideloading & direct execution | `dist/VoiceNote-1.0.0-arm64-v8a.apk`, `scripts/build-android-release.sh` | User + OS |
 
 ---
 
@@ -362,6 +366,58 @@ Home → Settings → Privacy
 - **Flow:** `SafeAreaProvider` + `StatusBar` style from `themeMode`; `logger.info('VoiceNote initialized in offline mode')`; `__smokeTest()` JSI bridge check (`src/native/smokeTest.ts`) logged. `AppNavigator` mounts Home.
 - **Postconditions:** Offline-ready shell; failures visible in logs, non-blocking.
 
+### UC-31 — First-Run Model Provisioning Modal
+
+- **Actors:** User + System
+- **Trigger:** App launch when baseline models are uninstalled (`src/components/FirstRunSetupModal.tsx`).
+- **Flow:**
+  1. Checks storage headroom via `storageQuota.checkHeadroom(requiredBytes)` (>20% buffer).
+  2. Sequentially initiates download of recommended ASR model (Whisper-Base) and SLM model (Qwen2.5-0.5B).
+  3. Displays live progress bar with downloaded byte counts.
+  4. Cryptographically validates model weights via streaming SHA-256 (`verifier.verify()`).
+  5. On completion, registers models in registry and dismisses setup modal, unlocking dictation.
+- **Alt flows:**
+  - Insufficient disk space triggers clear error with required megabytes.
+  - Checksum mismatch aborts installation, deletes corrupted file, and offers retry.
+- **Postconditions:** App ready for offline dictation; baseline models installed.
+
+### UC-32 — 5-Minute Continuous Dictation (Rolling Whisper & Paragraph SLM)
+
+- **Actors:** User + System
+- **Trigger:** Extended dictation session on `HomeScreen.tsx`.
+- **Flow:**
+  1. Native audio bridge slices incoming audio stream at silence boundaries into **20–25s chunks** (`onAudioChunkReady`).
+  2. Background FIFO ASR worker (`rollingAsrWorker.ts`) transcribes chunks sequentially while microphone remains active.
+  3. Previous chunk's tail words are passed as `initial_prompt` into the subsequent chunk to condition seam continuity.
+  4. Each audio chunk file is strictly deleted immediately upon transcription completion.
+  5. UI displays live countdown timer (`MM:SS / 05:00`), turning amber at 4:30 and flashing a countdown banner at 4:50.
+  6. At 5:00 (300 s), native safety ceiling triggers automatic finalization (`onRollingSafetyCeilingReached`).
+  7. Whisper is deallocated from memory, and the raw text is partitioned into **150–200 word semantic paragraphs** for sequential SLM tone rewriting (`paragraphRewriter.ts`).
+  8. Output text is automatically copied to the system clipboard, with unobtrusive toast confirmation.
+- **Postconditions:** Multi-paragraph formatted note displayed on `ResultScreen`; audio fully deleted; clipboard populated.
+
+### UC-33 — Standalone macOS DMG Installation & Gatekeeper Bypass
+
+- **Actors:** User + OS
+- **Trigger:** User downloads `VoiceNote-1.0.0.dmg` and installs on a macOS machine without development tools.
+- **Flow:**
+  1. User mounts `VoiceNote-1.0.0.dmg` and drags `VoiceNote.app` into `/Applications`.
+  2. Because the application uses ad-hoc codesigning (`codesign --force --deep --sign -`), Apple Gatekeeper presents an "unidentified developer" quarantine warning.
+  3. User applies standard macOS bypass: Secondary-click (Right-Click) `VoiceNote.app` in `/Applications` → click **Open** → confirm **Open**; or executes terminal command `xattr -cr /Applications/VoiceNote.app`.
+  4. `VoiceNote.app` launches autonomously with bundled `main.jsbundle` and universal binary (`libvoicenote_core.a` for Apple Silicon & Intel) without requiring an active Metro development server.
+- **Postconditions:** Desktop app runs 100% offline; file size remains strictly under 80 MB.
+
+### UC-34 — Standalone Android APK Sideloading & Direct Execution
+
+- **Actors:** User + OS
+- **Trigger:** User sideloads `VoiceNote-1.0.0-arm64-v8a.apk` onto an Android 10+ device.
+- **Flow:**
+  1. User enables "Install unknown apps" in Android Settings and installs the APK directly or via ADB (`adb install -r dist/VoiceNote-1.0.0-arm64-v8a.apk`).
+  2. App launches autonomously with embedded `index.android.bundle` and cross-compiled Rust JNI binary (`libvoicenote_core.so` targeting `arm64-v8a`).
+  3. Requests strictly `RECORD_AUDIO` permission on initial capture.
+  4. Runs completely independent of a development machine or Metro server.
+- **Postconditions:** Mobile app runs 100% offline; APK size remains strictly under 80 MB.
+
 ---
 
 ## 4. Non-Functional Requirements & Acceptance Criteria
@@ -375,21 +431,25 @@ Home → Settings → Privacy
 | Reliability | SLM hallucination guard `validatePreservation`; WER harness for ASR | `tests/slm/validator.test.ts`, `tests/asr/transcribe.test.ts`, fixtures |
 | i18n | EN/HI auto-detect, Hinglish prompt, romanization option | `tests/asr/romanize.test.ts`, `tests/slm/rewrite.test.ts` |
 | Accessibility | All touchables have `accessibilityRole/label`; theme contrast | `tests/screens/uiFlow.test.ts`, manual VoiceOver/TalkBack |
-| Quality gates | `npm test`, `npm run typecheck`, `npm run lint` green | CI / `jest.config.js` |
+| Quality gates | `npm test` (50 suites, 280 tests), `npm run typecheck`, `npm run lint`, `npm run audit:privacy` green | CI / `jest.config.js` |
+| Packaging | Standalone `.dmg` and `.apk` installers strictly under 80 MB ceiling | `scripts/build-macos-dmg.sh`, `scripts/build-android-release.sh`, `tests/native/packagingSanity.test.ts` |
+| Continuous dictation | 5-minute (300s) safety ceiling, 20–25s slicing, background FIFO ASR, 150–200 word paragraph SLM | `src/audio/rollingRecorder.ts`, `src/ml/asr/rollingAsrWorker.ts`, `tests/pipeline/rollingRecorder.test.ts` |
 
 ---
 
 ## 5. Traceability: Screens → Use Cases → Code
 
-| Screen | UCs | Key Files |
+| Screen / Component | UCs | Key Files |
 |---|---|---|
-| Home | UC-01–07, UC-08/10 (via pipeline), UC-25(partial), UC-28 | `screens/HomeScreen.tsx`, `audio/*`, `components/ToneSelector.tsx`, `LanguageSelector.tsx`, `Waveform.tsx`, `PermissionGate.tsx` |
+| Home | UC-01–07, UC-08/10 (via pipeline), UC-25(partial), UC-28, UC-32 | `screens/HomeScreen.tsx`, `audio/*`, `components/ToneSelector.tsx`, `LanguageSelector.tsx`, `Waveform.tsx`, `PermissionGate.tsx` |
 | Result | UC-11–16, UC-29 | `screens/ResultScreen.tsx`, `ml/slm/index.ts` |
 | History | UC-17–20, UC-14/15 | `screens/HistoryScreen.tsx`, `services/history/*` |
 | Models | UC-21–24 | `screens/ModelsScreen.tsx`, `services/modelManager/*`, `components/ProgressBar.tsx` |
+| Setup Modal | UC-31 | `components/FirstRunSetupModal.tsx`, `App.tsx` |
 | Settings | UC-25, UC-27 (+link UC-26) | `screens/SettingsScreen.tsx`, `state/useSettingsStore.ts` |
 | Privacy | UC-26 | `screens/PrivacyScreen.tsx` |
-| Pipeline (headless) | UC-08, UC-10, UC-29 | `pipeline/orchestrator.ts`, `ml/asr/*`, `ml/slm/*` |
+| Pipeline (headless) | UC-08, UC-10, UC-29, UC-32 | `pipeline/orchestrator.ts`, `ml/asr/*`, `ml/slm/*`, `rollingAsrWorker.ts`, `paragraphRewriter.ts` |
+| Packaging Pipelines | UC-33, UC-34 | `scripts/build-macos-dmg.sh`, `scripts/build-android-release.sh`, `scripts/build-all.sh`, `docs/PACKAGING.md` |
 
 ---
 

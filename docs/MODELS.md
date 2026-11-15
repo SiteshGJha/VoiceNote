@@ -31,3 +31,13 @@
 
 ## 5. Bake-Off Records
 *Run `/bake-off-slm` to generate benchmark runs and append results here.*
+
+---
+
+## 6. On-Demand Provisioning vs. Packaging Size Ceiling
+
+In accordance with PRD non-negotiable constraints, **no speech recognition (Whisper) or language model (SLM) weights are bundled into the application binary**.
+
+- **Standalone Package Ceiling**: Release installers (`dist/VoiceNote-1.0.0.dmg` and `dist/VoiceNote-1.0.0-arm64-v8a.apk`) must remain strictly under **80 MB** (actual release packages are ~25–45 MB).
+- **Automated Build Gate**: If weights are inadvertently copied into assets, `scripts/build-macos-dmg.sh`, `scripts/build-android-release.sh`, and `scripts/build-all.sh` detect the size violation and fail the build immediately.
+- **Post-Install Provisioning**: All model weights are provisioned post-installation through user action (via `FirstRunSetupModal.tsx` or `ModelsScreen.tsx`), downloaded over resumable HTTPS with storage headroom verification, and checked against catalog SHA-256 digests.

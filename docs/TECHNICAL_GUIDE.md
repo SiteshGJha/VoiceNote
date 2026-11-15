@@ -69,6 +69,7 @@ guaranteeing memory safety, off-main-thread execution, and hardware-accelerated 
 - Every PCM frame is pushed through `pushFrame()`, which computes normalized amplitude for the **live waveform UI** and dispatches to listeners (VAD).
 - **RAII `Drop` Ephemerality**: In Rust (`src/audio/buffer.rs`), `AudioBuffer` implements `Drop`. When the buffer goes out of scope, finishes ASR, or aborts mid-recording, the underlying temporary audio file is **strictly deleted** immediately, guaranteeing zero sensitive audio data leakage even during panics or crashes.
 - On stop, raw PCM is **silence-trimmed** and wrapped with a standard 44-byte WAV header (`wav.rs` / `wavUtils.ts`) into a **temporary cache file**.
+- **5-Minute Continuous Dictation (Rolling Whisper)** (`src/audio/rollingRecorder.ts`, `AppDelegate.mm`, `VoiceNoteNativeAudioModule.kt`): For extended dictations, the native recorder captures audio continuously and automatically partitions it at natural silence boundaries into **20–25s slices** (`onAudioChunkReady`). A native safety timer enforces a hard **5-minute (300s)** ceiling (`onRollingSafetyCeilingReached`), auto-finalizing recording to prevent device memory exhaustion.
 
 ### 3.2 Voice Activity Detection (`src/vad/silero.rs`, `src/vad/gate.rs`, `src/native/webrtcVad.ts`)
 - Powered on-device by **Silero VAD V4 ONNX** running via `tract-onnx` with zero phase distortion and minimal CPU overhead.
@@ -89,6 +90,7 @@ guaranteeing memory safety, off-main-thread execution, and hardware-accelerated 
 - **Model guard**: verifies the model file actually exists on disk; returns `ASR_MODEL_MISSING` with a clear re-download message.
 - **Bilingual strategy** (`language.ts`, Rust `src/asr/language.rs`): for `auto`, short clips (<1.5 s) default to English (Whisper's detector is unreliable that short); longer clips use a Hinglish-aware `initial_prompt` so code-switched Hindi/English are transcribed in the correct scripts.
 - **Long-audio segmentation** (`segmenter.ts`, Rust `src/asr/segmenter.rs`): WAVs > 27 s are sliced into ≤27 s segments **at silence boundaries** (so words are never cut), each segment is transcribed independently with its own adaptive timeout, and results are merged. This prevents the "dropped/truncated audio" problem of feeding a long clip into Whisper's fixed ~30 s window.
+- **Rolling FIFO Whisper Worker** (`src/ml/asr/rollingAsrWorker.ts`): In continuous 5-minute capture mode, incoming 20–25s audio chunks are queued into a sequential FIFO background worker. Whisper transcribes chunks concurrently with ongoing recording. To eliminate seam boundary hallucination, the tail words of chunk `N-1` are passed as the `initial_prompt` for chunk `N`. Each intermediate chunk file is strictly deleted immediately upon transcription completion.
 - **Adaptive timeout** (`computeTimeoutForDuration`): `3 × audio duration + 15 s`, clamped to [30 s, 120 s] — larger models on slow devices don't spuriously time out, and worst cases stay bounded.
 - **Devanagari normalization & Romanization** (`normalize.ts`, `romanize.ts`): whitespace/punctuation cleanup that is Devanagari-safe, plus deterministic phonetic transliteration to Latin script when requested.
 
@@ -96,6 +98,7 @@ guaranteeing memory safety, off-main-thread execution, and hardware-accelerated 
 - On-device GGUF SLM engine (`LlamaEngine`): validates GGUF container headers and memory coordination (< 500 MB RAM budget), and performs structured rewriting validated by the Rust hallucination guard (`validate_preservation`). Standalone zero-dependency library without bundled third-party cmake llama.cpp binary.
 - **Prompt engineering** (`promptBuilder.ts`, Rust `src/asr/language.rs`): canonical templates for *Professional* and *Casual* with explicit rules — remove filler words, complete sentences, **preserve facts/names/numbers/dates**, no preamble, low temperature (0.3) for faithful rewriting.
 - **ModelCoordinator (< 500 MB RAM Budget)** (`src/model_coordinator.rs`): Enforces mutual exclusion between ASR and SLM model memory allocations. If the SLM is invoked while ASR is in memory, ASR is unloaded first (and vice-versa). An idle timer automatically unloads models after 60 seconds of inactivity to keep baseline RAM footprint near zero.
+- **Semantic Paragraph Rewriter** (`src/ml/slm/paragraphRewriter.ts`): For long continuous transcripts, the orchestrator divides text into natural **150–200 word semantic paragraph chunks**. Each paragraph is rewritten sequentially with its own entity preservation check and joined with clean double-newlines. Whisper is explicitly unloaded from memory prior to paragraph rewriting to guarantee strict adherence to the `< 500 MB` RAM budget.
 - **Rust Hallucination Guard** (`validator.ts`, Rust `src/slm/validator.rs`):
   1. **Entity extraction**: regex-izes numbers, units, dates, currencies, capitalized proper nouns (skipping common sentence starters + filler words).
   2. **Entity preservation**: every critical entity extracted from the raw transcript MUST be present in the rewritten output (handling time variations like "3pm" ↔ "3:00 PM" and ordinals like "15th" ↔ "15").
@@ -120,6 +123,21 @@ guaranteeing memory safety, off-main-thread execution, and hardware-accelerated 
 - **`InteractionManager.runAfterInteractions`** defers heavy UI transitions until the JS thread is idle → smooth animations during ML processing.
 - **Haptics + accessibility**: every touchable has `accessibilityRole`/`accessibilityLabel`; haptic feedback is togglable.
 
+### 3.9 Standalone Production Packaging (`scripts/build-macos-dmg.sh`, `scripts/build-android-release.sh`, `scripts/build-all.sh`)
+- **Universal macOS DMG Packaging** (`scripts/build-macos-dmg.sh`):
+  - Pre-flight checks validate Xcode, CocoaPods, and Rust targets (`aarch64-apple-darwin`, `x86_64-apple-darwin`).
+  - Dual static Rust slices are compiled and merged into a universal fat binary `macos/build/rust/libvoicenote_core.a` using Apple `lipo`.
+  - Bundles offline JavaScript (`main.jsbundle`) and executes headless `xcodebuild archive` in Release configuration.
+  - Applies inside-out ad-hoc codesigning (`codesign --force --deep --sign -`), signing embedded frameworks before the top-level app bundle.
+  - Stages the application into `dmg-root/` and packages `dist/VoiceNote-1.0.0.dmg` with `/Applications` symlink via `create-dmg` (fallback `hdiutil`).
+- **Standalone Android Release APK Packaging** (`scripts/build-android-release.sh`):
+  - Pre-flight checks validate JDK 17, Android SDK 34, Android NDK r26b/r27, `cargo-ndk`, and `aarch64-linux-android`.
+  - Cross-compiles `libvoicenote_core.so` targeting `arm64-v8a` via `cargo ndk` to `android/app/src/main/jniLibs/arm64-v8a/`.
+  - Scaffolds a complete React Native 0.76 Gradle/NDK build tree (`AGP 8.5.2`, `Kotlin 1.9.24`, `Gradle 8.8`).
+  - Automatically provisions local release keystore via `scripts/generate-android-keystore.sh` if missing (supporting CI secret overrides via `VN_KEYSTORE_*` env vars).
+  - Executes `./gradlew assembleRelease` to compile offline JS (`index.android.bundle`), link JNI, align, sign, and verify via `apksigner`.
+- **Enforced < 80 MB Package Size Ceiling**: Both packaging scripts strictly verify that output installers do not exceed 80 MB, actively preventing the accidental embedding of multi-hundred-MB ML weights. Models remain 100% on-demand.
+
 ---
 
 ## 4. Production-Grade Features (Voice-Memo Patterns)
@@ -140,7 +158,7 @@ The exact patterns interviewers look for in a voice-memo/audio ML product, and w
 | 10 | **Multi-language / code-switched support** | Bilingual prompts, short-clip heuristic, per-script normalization, dominant-language aggregation | `ml/asr/language.ts`, `normalize.ts`, `romanize.ts` |
 | 11 | **Long-form audio handling** | Segmentation prevents Whisper's 30 s window from truncating meetings/dictations | `ml/asr/segmenter.ts` |
 | 12 | **Safety on generated text** | Hallucination detection via entity + length preservation guards | `ml/slm/validator.ts` |
-| 13 | **Deterministic, testable core** | Pure functions and Rust native core thoroughly unit-tested | `tests/*` (203 Jest tests), `rust/tests/*` (67 Rust tests) |
+| 13 | **Deterministic, testable core** | Pure functions and Rust native core thoroughly unit-tested | `tests/*` (280 Jest tests across 50 test suites), `rust/tests/*` (68 Rust tests across 10 binaries) |
 | 14 | **Privacy audit as a build gate** | Automated check that no analytics/cloud SDKs are pulled in | `scripts/privacy-audit.js`, `npm run audit:privacy` |
 | 15 | **Observability without telemetry** | In-memory ring-buffer logger (max 200 entries) for diagnostics, logs only in dev — no third-party reporting | `utils/logger.ts` |
 | 16 | **Type-safe contract-first design** | Shared discriminated-union result types (`AsrResult`, `SlmResult`, `PipelineResult`) keep error handling exhaustive | `ml/types.ts`, `pipeline/types.ts` |
@@ -148,6 +166,9 @@ The exact patterns interviewers look for in a voice-memo/audio ML product, and w
 | 18 | **User-explicit data control** | Delete-one, clear-all, and master-wipe flows with confirmations | `HistoryScreen`, `SettingsScreen` |
 | 19 | **Accessibility & UX polish** | Accessibility roles/labels, haptics, live waveform, tone/language quick pickers, raw-vs-rewritten transparency toggle | `components/*`, screens |
 | 20 | **Model-tier trade-off UX** | Users choose speed vs accuracy (Tiny/Base/Small); recommended default highlighted | `SettingsScreen`, `ModelsScreen`, `MODELS.md` |
+| 21 | **Continuous live rolling capture** | Silence-bounded 20–25s chunks, FIFO background transcription, seam prompt injection, 5-minute safety ceiling | `src/audio/rollingRecorder.ts`, `src/ml/asr/rollingAsrWorker.ts` |
+| 22 | **Semantic paragraph SLM rewriting** | Long transcripts split into 150–200 word blocks rewritten sequentially with entity guards & RAM deallocation | `src/ml/slm/paragraphRewriter.ts` |
+| 23 | **Standalone production packaging (< 80 MB ceiling)** | Universal DMG (fat `lipo` binary + ad-hoc sign) & standalone Android APK (Gradle + `cargo-ndk` JNI) without Metro | `scripts/build-macos-dmg.sh`, `build-android-release.sh`, `PACKAGING.md` |
 
 ---
 
@@ -194,14 +215,17 @@ Streaming/partial results during recording, punctuation restoration, speaker dia
 |---|---|
 | End-to-end pipeline | `src/pipeline/orchestrator.ts`, `src/ml/types.ts` |
 | Rust native core & C-ABI | `rust/voicenote-core/src/lib.rs`, `src/native/rustCore/RustCoreHybridObject.cpp` |
+| Android JNI cross-compilation | `rust/voicenote-core/src/android_jni.rs`, `android/app/src/main/java/com/voicenote/core/VoiceNoteCoreJni.kt` |
 | Recording, VAD & AudioBuffer | `rust/voicenote-core/src/audio/buffer.rs`, `rust/voicenote-core/src/vad/silero.rs`, `src/audio/recorder.ts` |
+| Continuous rolling Whisper | `src/audio/rollingRecorder.ts`, `src/ml/asr/rollingAsrWorker.ts` |
 | ASR with Hinglish strategy | `rust/voicenote-core/src/asr/whisper.rs`, `src/asr/segmenter.rs`, `src/ml/asr/index.ts` |
-| Tone rewrite + guard | `rust/voicenote-core/src/slm/llama.rs`, `src/slm/validator.rs`, `src/ml/slm/index.ts` |
+| Tone rewrite, paragraphs & guard | `rust/voicenote-core/src/slm/llama.rs`, `src/ml/slm/paragraphRewriter.ts`, `src/slm/validator.rs` |
 | Memory & model coordinator | `rust/voicenote-core/src/model_coordinator.rs` |
 | Models lifecycle & crypto | `rust/voicenote-core/src/crypto/sha256.rs`, `src/services/modelManager/catalog.ts`, `installer.ts` |
 | Secure history | `src/services/history/storage.ts`, `keychain.ts` |
-| UI flows | `src/screens/HomeScreen.tsx`, `ResultScreen.tsx`, `HistoryScreen.tsx` |
-| Product spec | `docs/PRD.md`, `docs/MODELS.md`, `docs/USE_CASES.md` |
+| Standalone packaging pipelines | `scripts/build-macos-dmg.sh`, `scripts/build-android-release.sh`, `docs/PACKAGING.md` |
+| UI flows & setup modal | `src/screens/HomeScreen.tsx`, `ResultScreen.tsx`, `FirstRunSetupModal.tsx` |
+| Product spec & packaging design | `docs/PRD.md`, `docs/MODELS.md`, `docs/USE_CASES.md`, `docs/PACKAGING.md` |
 
 ---
 
@@ -210,12 +234,15 @@ Streaming/partial results during recording, punctuation restoration, speaker dia
 - Samplerate: **16 kHz**, 16-bit, mono (Whisper/VAD native format).
 - VAD frame: **30 ms** (960 bytes/frame) or **512 samples** (32 ms); auto-stop silence window default **1500 ms**.
 - Silence trim padding: **200 ms**; speech threshold **0.04** normalized RMS.
+- Continuous capture ceiling: **5 minutes (300 s)**; rolling chunk slice size: **20–25 s**; warning banner threshold: **4:30** amber, **4:50** countdown.
+- Paragraph rewriting chunk size: **150–200 words** per semantic block.
 - ASR models (Whisper): Tiny **~78 MB**, Base **~148 MB**, Small **~480 MB**.
 - SLM models (GGUF): Qwen2.5-0.5B **~350 MB**, Palmer-005 **~380 MB**, Gemma-2-2B **~1.4 GB**.
+- Standalone installer package size ceiling: strictly **< 80 MB** (actual artifacts ~25–45 MB).
 - Timeout: **3 × duration + 15 s**, clamped **[30 s, 120 s]**.
 - Segmentation threshold: **>27 s** → slice to ≤27 s segments at silence gaps.
 - Memory budget: **< 500 MB RAM budget** enforced via `ModelCoordinator` mutual exclusion; **60s idle auto-unload**.
 - Rewriting validation ratio: **[0.35×, 2.5×]** length bound with exact entity preservation.
 - History cap: **50 records**, FIFO eviction.
 - SLM generation: **temperature 0.3**, top-P 0.9, max 512 tokens.
-- Test coverage: **67 Rust tests** across 10 test suites; **203 Jest tests** across 40 test suites; 100% offline.
+- Test coverage: **68 Rust tests** across 10 test suites; **280 Jest tests** across 50 test suites; 100% offline.

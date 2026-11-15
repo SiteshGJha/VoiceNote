@@ -18,6 +18,7 @@ rust/voicenote-core/
 ├── voicenote_core.h             # C header generated at build time
 └── src/
     ├── lib.rs                   # C-ABI extern "C" entry points, FFI types & allocators
+    ├── android_jni.rs           # Android JNI bindings for Kotlin bridge via cargo-ndk
     ├── errors.rs                # C-compatible error taxonomy (VnErrorCode 1:1 with MlErrorCode)
     ├── model_coordinator.rs     # Mutual exclusion (< 500 MB RAM budget) & 60s idle auto-unload
     ├── audio/
@@ -78,7 +79,14 @@ rust/voicenote-core/
 ### 2.6 Cryptographic Verification (`src/crypto/`)
 - **`sha256.rs`**: Streaming SHA-256 verifier powered by `ring = "0.17"`. Verifies downloaded model weights chunk-by-chunk directly from disk with minimal memory overhead before registration.
 
-### 2.7 Error Taxonomy (`src/errors.rs`)
+### 2.8 Android JNI Subsystem (`src/android_jni.rs`)
+- Implements JNI `extern "system"` entry points exposed to Kotlin via `VoiceNoteCoreJni`:
+  - `Java_com_voicenote_core_VoiceNoteCoreJni_trimSilenceWav`: Audio silence trimming and RIFF WAV serialization.
+  - `Java_com_voicenote_core_VoiceNoteCoreJni_verifyFileChecksum`: Zero-copy SHA-256 model weight integrity verification.
+  - `Java_com_voicenote_core_VoiceNoteCoreJni_transcribeAudio`: On-device Whisper transcription returning structured `VoiceNoteAsrResult`.
+  - `Java_com_voicenote_core_VoiceNoteCoreJni_getCoreVersion`: Crate semantic version string (`"1.0.0"`).
+
+### 2.9 Error Taxonomy (`src/errors.rs`)
 - Defines `VnErrorCode` mapping 1:1 to TypeScript `MlErrorCode`:
   - `101`: `ASR_EMPTY_OUTPUT`
   - `102`: `ASR_TIMEOUT`
@@ -96,13 +104,14 @@ rust/voicenote-core/
 
 Build scripts are located in `scripts/`:
 
-### 3.1 macOS (Apple Silicon / Intel)
-Compiles `libvoicenote_core.a` for macOS host architecture and copies the static library and generated C header to `macos/build/rust/`:
+### 3.1 macOS Universal Build (Apple Silicon & Intel)
+Compiles `libvoicenote_core.a` for dual targets (`aarch64-apple-darwin` and `x86_64-apple-darwin`), combines them into a universal fat static library via Apple `lipo`, and copies the archive and generated C header to `macos/build/rust/`:
 ```bash
 bash scripts/build-macos.sh
+# Alternatively used automatically by: npm run build:macos:dmg
 ```
 Artifacts generated:
-- `macos/build/rust/libvoicenote_core.a`
+- `macos/build/rust/libvoicenote_core.a` (Universal `arm64` + `x86_64`)
 - `macos/build/rust/voicenote_core.h`
 
 ### 3.2 iOS (Device + Simulator XCFramework)
@@ -115,15 +124,16 @@ Artifacts generated:
 
 > **Note on CoreML**: `build.rs` checks if `--features coreml` is enabled when building for iOS. If absent, a compiler alert notifies the developer that whisper-rs will fall back to CPU NEON SIMD vectorization.
 
-### 3.3 Android (JNI Libraries)
+### 3.3 Android JNI Libraries (`cargo-ndk`)
 Uses `cargo-ndk` to cross-compile for Android (`aarch64-linux-android`, API level 29) and outputs the shared library to the Android project's `jniLibs` directory:
 ```bash
 bash scripts/build-android.sh
+# Alternatively used automatically by: npm run build:android:release
 ```
 Artifacts generated:
 - `android/app/src/main/jniLibs/arm64-v8a/libvoicenote_core.so`
 
-*(If `cargo-ndk` or `ANDROID_NDK_HOME` is not detected in the environment, the script outputs a graceful notice and skips compilation).*
+*(If `cargo-ndk` or `ANDROID_NDK_HOME` is not detected in the environment, the script outputs a graceful notice with remediation commands and skips compilation).*
 
 ---
 
@@ -135,7 +145,7 @@ Unit and integration tests run entirely offline with synthetic fixtures:
 cargo test --manifest-path rust/Cargo.toml
 ```
 
-### Test Suites Included (67 Tests)
+### Test Suites Included (68 Tests)
 - `tests/audio_buffer_test.rs`: Zero-length PCM safety, RAII `Drop` temporary file deletion, sample normalization.
 - `tests/silence_trim_test.rs`: Pure silence detection, speech padding preservation, boundary clamping.
 - `tests/wav_test.rs`: 44-byte RIFF header validation, C-ABI `vn_audio_trim_and_save_wav`.

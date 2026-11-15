@@ -55,3 +55,15 @@
 - [x] Sequential Whisper memory deallocation before SLM allocation (< 500 MB RAM budget)
 - [x] UI countdown timer (`MM:SS / 05:00`), 4:30 amber warning, and 4:50 countdown banner
 - [x] Automated Jest unit test suite covering rolling recorder, FIFO worker, SLM paragraphs, and UI ceiling
+
+## Phase 9: Standalone Android APK & macOS DMG Production Packaging
+- [x] Automated pre-flight toolchain validation scripts for macOS (`scripts/build-macos-dmg.sh`) and Android (`scripts/build-android-release.sh`)
+- [x] Dual-architecture static Rust compilation (`aarch64` and `x86_64`) with Apple `lipo` fat library merging
+- [x] Headless release Xcode archiving and inside-out ad-hoc codesigning (`codesign --force --deep --sign -`)
+- [x] Standalone macOS DMG installer packaging with `/Applications` drag-and-drop symlink (`create-dmg` / `hdiutil`)
+- [x] Complete React Native 0.76 Android project tree scaffolding (`build.gradle`, `settings.gradle`, `app/build.gradle`, Gradle wrapper 8.8)
+- [x] Native Android Kotlin entry points (`MainActivity.kt`, `MainApplication.kt`), ProGuard rules, and XML resources
+- [x] JNI cross-compilation bridge (`voicenote_core/src/android_jni.rs` and `AndroidNativeBridge.kt`) via `cargo-ndk` targeting `arm64-v8a`
+- [x] Automated development release keystore generator (`scripts/generate-android-keystore.sh`) supporting external CI environment secrets
+- [x] Standalone signed release APK assembly via Gradle (`./gradlew assembleRelease`) with cryptographic `apksigner` validation
+- [x] Multi-platform packaging orchestrator (`scripts/build-all.sh`) with strict `< 80 MB` installer size ceiling enforcement

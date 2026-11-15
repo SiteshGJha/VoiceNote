@@ -49,7 +49,7 @@ fn read_pcm_samples(path: &Path) -> std::io::Result<Vec<i16>> {
 
 #[no_mangle]
 pub unsafe extern "system" fn Java_com_voicenote_core_VoiceNoteCoreJni_getCoreVersion(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _class: JClass,
 ) -> jstring {
     let version_raw = crate::voicenote_core_version();

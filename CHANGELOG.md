@@ -3,6 +3,45 @@
 All notable changes to **VoiceNote** will be documented in this file.
 The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-11-15
+
+### Added
+- **Standalone Android Release APK Pipeline (`scripts/build-android-release.sh`)**
+  - Cross-compiles `libvoicenote_core.so` targeting `arm64-v8a` (Android API 29+) via `cargo-ndk`.
+  - Bootstrapped full React Native 0.76 Gradle/NDK hierarchy (`AGP 8.5.2`, `Kotlin 1.9.24`, `Gradle 8.8`).
+  - Implemented Kotlin native module `VoiceNoteNativeAudioModule.kt` matching complete `src/native/nativeAudio.ts` contract (16 kHz PCM recording via `AudioRecord`, live metering calculation, rolling chunk slicing, HTTP redirect following up to 5 hops, and mapped ASR error taxonomy).
+  - Implemented JNI C-FFI bridge in `rust/voicenote-core/src/android_jni.rs` with `VoiceNoteCoreJni.kt`.
+  - Automatic developer release keystore generator `scripts/generate-android-keystore.sh` supporting CI environment secrets.
+  - Dynamic `apksigner` signature verification in build script.
+- **Standalone Universal macOS DMG Pipeline (`scripts/build-macos-dmg.sh`)**
+  - Compiles dual-architecture static Rust slices (`aarch64-apple-darwin` + `x86_64-apple-darwin`) merged via `lipo` into `macos/build/rust/libvoicenote_core.a`.
+  - Offline standalone JavaScript bundling (`main.jsbundle`) and assets packaging.
+  - Headless `xcodebuild archive` in Release configuration.
+  - Inside-out ad-hoc codesigning with strict bundle verification (`codesign --verify --deep --strict`).
+  - Staging into intermediate `dmg-root` volume layout for `/Applications` drag-and-drop.
+- **Package Size Ceiling Enforcement (< 80 MB)**
+  - Automated hard assertion in build scripts ensuring no Whisper or SLM model weights are accidentally bundled into installer assets.
+- **Automated Packaging Sanity Test Suite (`tests/native/packagingSanity.test.ts`)**
+  - 33 automated tests validating script existence, executable bits, size limit logic, git hygiene, and scaffolding contracts.
+- **Packaging Documentation (`docs/PACKAGING.md`)**
+  - Complete guide for prerequisites, build commands, Gatekeeper bypass (`xattr -cr`), and Android sideloading.
+
+## [2.1.0] - 2026-11-08
+
+### Added
+- **5-Minute Continuous Speech-to-Text Engine (Live Rolling Whisper)**
+  - Native rolling audio capture slicing at silence boundaries (20.0s – 25.0s window, RMS < -36 dBFS for >= 350 ms).
+  - Hard 300.0s (5-minute) safety ceiling with automatic trailing chunk sealing and `onCeilingReached` event.
+  - Background FIFO Whisper ASR queue (depth cap: 1) conditioning chunk $N$ with trailing 40 chars of chunk $N-1$ via `initialPrompt`.
+  - Strict audio ephemerality: temporary chunk audio files deleted immediately post-ASR in `finally` blocks.
+  - Sequential paragraph SLM rewriter slicing transcripts into 150–200 word semantic blocks with 8s timeout and entity preservation isolation.
+  - Sequential memory mutual exclusion: Whisper deallocation cooldown before SLM allocation (< 500 MB RAM budget).
+- **In-Place Dictation UI & Auto-Copy Workflow**
+  - `HomeScreen` countdown timer (`MM:SS / 05:00`), amber styling at 4:30 with haptics, and 4:50 warning banner.
+  - Automatic clipboard copy of rewritten note upon completion (guarded by active AppState).
+  - Unobtrusive Toast notifications with "View Note" navigation action.
+  - First-Run model setup modal (`FirstRunSetupModal.tsx`) with storage headroom validation (>20% free disk).
+
 ## [2.0.0] - 2026-11-01
 
 ### Added
