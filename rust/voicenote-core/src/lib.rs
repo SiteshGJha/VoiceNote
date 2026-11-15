@@ -6,6 +6,9 @@ pub mod model_coordinator;
 pub mod slm;
 pub mod vad;
 
+#[cfg(any(target_os = "android", test))]
+pub mod android_jni;
+
 pub use asr::{AsrOutput, WhisperEngine};
 pub use audio::{
     trim_silence, trim_silence_with_rate, wrap_pcm_with_wav_header, AudioBuffer, TrimResult,
@@ -20,7 +23,7 @@ use std::os::raw::{c_char, c_void};
 
 #[no_mangle]
 pub extern "C" fn voicenote_core_version() -> *const c_char {
-    CString::new("0.1.0").unwrap().into_raw()
+    CString::new("1.0.0").unwrap().into_raw()
 }
 
 /// # Safety

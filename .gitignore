@@ -91,3 +91,9 @@ scratch/
 
 # Rust build target
 rust/target/
+
+# Standalone Packaging Outputs & Build Artifacts
+*.dmg
+*.xcarchive
+macos/build/
+android/app/src/main/jniLibs/
