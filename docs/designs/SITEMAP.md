@@ -1,0 +1,7 @@
+# Designs Sitemap
+
+| Design Document | Date | Author | Components Touched | Description |
+|---|---|---|---|---|
+| [First-Run Setup & Clipboard](first_run_setup_and_clipboard.md) | 2026-11-07 | Sitesh Jha | `installer.ts`, `FirstRunSetupModal.tsx`, `orchestrator.ts`, `HomeScreen.tsx`, `useSettingsStore.ts` | First-run model setup flow for Whisper & Qwen, instant auto-copy dictation pipeline, and sequential memory coordinator enforcement (< 500 MB RAM). |
+| [5-Minute Live Rolling Whisper](5min_live_rolling_whisper.md) | 2026-11-07 | Sitesh Jha | `AppDelegate.mm`, `nativeAudio.ts`, `whisperNative.ts`, `orchestrator.ts`, `slm/index.ts`, `HomeScreen.tsx` | Native live rolling Whisper ASR engine with 20–25s silence-bounded chunking, 5-minute strict ceiling, sequential paragraph SLM rewriting, and auto-clipboard copy (< 500 MB RAM). |
+| [Standalone Android APK & macOS DMG Production Packaging](standalone_android_apk_and_macos_dmg_packaging.md) | 2026-11-15 | Sitesh Jha | `android/`, `scripts/build-macos-dmg.sh`, `scripts/build-android-release.sh`, `rust/voicenote-core`, `docs/PACKAGING.md` | Production packaging pipelines for standalone ad-hoc universal macOS DMG (lipo) and signed Android APK (scaffolded Gradle/NDK & JNI) with fail-fast pre-flights and 80 MB size enforcement. |
