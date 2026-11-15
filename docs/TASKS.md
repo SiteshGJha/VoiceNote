@@ -36,3 +36,22 @@
 - [x] Implement history screen with encrypted storage (max 50 records)
 - [x] Enforce off-main-thread inference and UI responsiveness metrics
 - [x] Perform release checks and privacy audits
+
+## Phase 7: First-Run Provisioning Flow & In-Place Auto-Copy Dictation
+- [x] First-run model provisioning modal with storage headroom validation
+- [x] Sequential model download and cryptographic SHA-256 verification
+- [x] Explicit sequential Whisper deallocation post-ASR (< 500 MB RAM budget)
+- [x] Automatic clipboard copy for rewritten tone output
+- [x] In-place toast notification with "View Note" navigation action
+- [x] Auto-copy toggle in Settings screen and persistent Zustand store
+
+
+## Phase 8: 5-Minute Continuous Pipeline (Live Rolling Whisper)
+- [x] Silence-bounded rolling audio slicing (20–25s) in native audio bridge (`AppDelegate.mm`)
+- [x] Hard 5-minute (300s) native safety ceiling and auto-stop trigger
+- [x] Background FIFO Whisper ASR worker with `initialPrompt` seam conditioning
+- [x] Immediate post-ASR audio chunk file deletion (Ephemerality Prime Directive)
+- [x] Sequential paragraph SLM rewriter (150–200 words) with entity preservation guards
+- [x] Sequential Whisper memory deallocation before SLM allocation (< 500 MB RAM budget)
+- [x] UI countdown timer (`MM:SS / 05:00`), 4:30 amber warning, and 4:50 countdown banner
+- [x] Automated Jest unit test suite covering rolling recorder, FIFO worker, SLM paragraphs, and UI ceiling

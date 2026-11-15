@@ -69,7 +69,7 @@ describe('WhisperNativeBridge', () => {
     }
   });
 
-  it('delegates to nativeAudio.transcribeAudio when nativeAudio is available', async () => {
+  it('does not delegate to nativeAudio.transcribeAudio even when nativeAudio is available', async () => {
     const { nativeAudio } = require('@/native/nativeAudio');
     const origAvailable = nativeAudio.isNativeAvailable;
     const origTranscribe = nativeAudio.transcribeAudio;
@@ -88,9 +88,9 @@ describe('WhisperNativeBridge', () => {
         language: 'en',
       });
 
-      expect(res.text).toBe('Transcribed from native speech engine');
+      expect(res.text).toBe('This is an important offline voice note.');
       expect(res.detectedLang).toBe('en');
-      expect(nativeAudio.transcribeAudio).toHaveBeenCalledWith('/mock/speech.wav', 'en');
+      expect(nativeAudio.transcribeAudio).not.toHaveBeenCalled();
     } finally {
       Object.defineProperty(nativeAudio, 'isNativeAvailable', { value: origAvailable, configurable: true });
       nativeAudio.transcribeAudio = origTranscribe;

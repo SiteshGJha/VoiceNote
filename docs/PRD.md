@@ -15,7 +15,8 @@ VoiceNote is a fully offline, privacy-first mobile application that converts spe
 4. **ASR (Automated Speech Recognition)**: On-device Whisper engine (`whisper-rs` / whisper.cpp with Metal GPU acceleration and CoreML build alert) supporting English (en), Hindi (hi), and Hinglish (code-switched), featuring >27s silence-based segmentation.
 5. **Tone SLM & Hallucination Guard**: On-device Small Language Model with `ModelCoordinator` (< 500 MB RAM budget mutual exclusion) and regex-based critical entity preservation.
 6. **Cryptographic Model Verification**: Streaming SHA-256 verifier (`ring = "0.17"`) for zero-copy model weight integrity checks.
-7. **UI Presentation**: Clean, responsive transcription display with one-tap copy, editable text, instant re-rewriting, and encrypted history.
+7. **UI Presentation & Fast Dictation**: Clean, responsive transcription display with one-tap copy, editable text, instant re-rewriting, encrypted history, and seamless in-place dictation with automatic clipboard copy and unobtrusive toast feedback.
+8. **First-Run Provisioning**: Seamless in-app setup modal that performs disk quota checks (>20% headroom) and downloads/verifies baseline ASR and SLM models before recording is permitted.
 
 ## Non-Negotiable Constraints
 - **Zero Cloud Inference**: 100% offline inference. No audio, transcript, or rewritten text leaves the physical device.

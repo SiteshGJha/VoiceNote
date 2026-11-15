@@ -14,6 +14,7 @@ export interface AsrOptions {
   lang: Lang;
   hindiOutput?: HindiOutputFormat | undefined;
   prompt?: string | undefined;
+  initialPrompt?: string | undefined;
   timeoutMs?: number | undefined;
   asrTier?: AsrModelTier | undefined;
 }

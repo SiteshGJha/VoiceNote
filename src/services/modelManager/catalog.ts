@@ -70,17 +70,6 @@ export const MODEL_CATALOG: ModelSpec[] = [
     minRamGb: 2,
     recommended: true,
   },
-  {
-    id: 'palmer-005',
-    kind: 'slm',
-    displayName: 'Palmer-005 (0.5B Rewrite)',
-    sizeBytes: 380_000_000,
-    version: '0.5.0',
-    url: 'https://huggingface.co/local-models/palmer-005-gguf/resolve/main/palmer-005-q4_k_m.gguf',
-    sha256: '7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d',
-    quant: 'Q4_K_M',
-    minRamGb: 2,
-  },
 ];
 
 export function getModelSpec(id: string): ModelSpec | undefined {

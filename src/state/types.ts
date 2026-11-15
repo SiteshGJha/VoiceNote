@@ -20,6 +20,7 @@ export interface UserSettings {
   hardwareTriggerButton: 'volume' | 'headphone' | 'none';
   maxHistoryRecords: number;
   hasCompletedOnboarding: boolean;
+  autoCopyToClipboard: boolean;
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -33,4 +34,5 @@ export const DEFAULT_SETTINGS: UserSettings = {
   hardwareTriggerButton: 'volume',
   maxHistoryRecords: 500,
   hasCompletedOnboarding: false,
+  autoCopyToClipboard: true,
 };

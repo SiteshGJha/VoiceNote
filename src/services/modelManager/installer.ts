@@ -8,6 +8,13 @@ import { asrModelRegistry } from '@/ml/asr/modelRegistry';
 import { slmModelRegistry } from '@/ml/slm/modelRegistry';
 import { logger } from '@/utils/logger';
 
+export interface ProvisioningStatus {
+  isProvisioned: boolean;
+  hasAsr: boolean;
+  hasSlm: boolean;
+  missingSpecs: ModelSpec[];
+}
+
 class ModelInstallerService {
   private installedModels: Map<string, InstalledModel> = new Map();
   private modelsDir: string;
@@ -159,6 +166,53 @@ class ModelInstallerService {
 
   public isInstalled(id: string): boolean {
     return this.installedModels.has(id);
+  }
+
+  public getProvisioningStatus(): ProvisioningStatus {
+    const installed = this.listInstalled();
+    const hasAsr = installed.some((m) => {
+      try {
+        const hasPath = typeof m.localPath === 'string' && m.localPath.length > 0;
+        const hasSize = typeof m.sizeBytes === 'number' && m.sizeBytes > 0;
+        return m.kind === 'asr' && hasPath && hasSize && fs.existsSync(m.localPath);
+      } catch {
+        return false;
+      }
+    });
+    const hasSlm = installed.some((m) => {
+      try {
+        const hasPath = typeof m.localPath === 'string' && m.localPath.length > 0;
+        const hasSize = typeof m.sizeBytes === 'number' && m.sizeBytes > 0;
+        return m.kind === 'slm' && hasPath && hasSize && fs.existsSync(m.localPath);
+      } catch {
+        return false;
+      }
+    });
+
+    const missingSpecs: ModelSpec[] = [];
+    if (!hasAsr) {
+      const asrSpec =
+        MODEL_CATALOG.find((m) => m.kind === 'asr' && m.recommended) ??
+        getModelSpec('whisper-base-multilingual');
+      if (asrSpec) missingSpecs.push(asrSpec);
+    }
+    if (!hasSlm) {
+      const slmSpec =
+        MODEL_CATALOG.find((m) => m.kind === 'slm' && m.recommended) ??
+        getModelSpec('qwen2.5-0.5b-instruct');
+      if (slmSpec) missingSpecs.push(slmSpec);
+    }
+
+    return {
+      isProvisioned: hasAsr && hasSlm,
+      hasAsr,
+      hasSlm,
+      missingSpecs,
+    };
+  }
+
+  public isProvisioned(): boolean {
+    return this.getProvisioningStatus().isProvisioned;
   }
 
   public getTotalStorageUsageBytes(): number {

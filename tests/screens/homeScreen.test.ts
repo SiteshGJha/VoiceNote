@@ -37,11 +37,24 @@ jest.mock('@/services/modelManager', () => ({
       { kind: 'asr', id: 'whisper-base' },
       { kind: 'slm', id: 'qwen' },
     ],
+    isProvisioned: () => true,
+    getProvisioningStatus: () => ({
+      isProvisioned: true,
+      hasAsr: true,
+      hasSlm: true,
+      missingSpecs: [],
+    }),
   },
 }));
 
 const mockNativeAudio = {
   isNativeAvailable: false,
+  addChunkReadyListener: jest.fn().mockReturnValue(() => {}),
+  addCeilingListener: jest.fn().mockReturnValue(() => {}),
+  addMeteringListener: jest.fn().mockReturnValue(() => {}),
+  startRollingRecording: jest.fn().mockResolvedValue(true),
+  stopRollingRecording: jest.fn().mockResolvedValue(null),
+  cancelRollingRecording: jest.fn().mockResolvedValue(undefined),
 };
 jest.mock('@/native/nativeAudio', () => ({
   nativeAudio: mockNativeAudio,

@@ -14,17 +14,9 @@ const DEFAULT_SLM_MODELS: Record<string, SlmModelInfo> = {
     id: 'qwen2.5-0.5b-instruct',
     name: 'Qwen 2.5 (0.5B Instruct)',
     quant: 'Q4_K_M',
-    sizeBytes: 350_000_000,
+    sizeBytes: 491_400_032,
     filePath: '/models/slm/qwen2.5-0.5b-instruct-q4_k_m.gguf',
     isInstalled: true,
-  },
-  'palmer-005': {
-    id: 'palmer-005',
-    name: 'Palmer-005 (0.5B Rewrite)',
-    quant: 'Q4_K_M',
-    sizeBytes: 380_000_000,
-    filePath: null,
-    isInstalled: false,
   },
 };
 

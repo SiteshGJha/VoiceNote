@@ -119,8 +119,9 @@ export async function transcribe(uri: string, opts: AsrOptions): Promise<AsrResu
       }
     }
 
-    // 4. Bilingual language strategy (Hinglish prompt + short-clip heuristic)
-    const strategy = computeLanguageStrategy(opts.lang, audioDurationMs, opts.prompt);
+    // 4. Bilingual language strategy (Hinglish prompt + short-clip heuristic + prompt conditioning)
+    const promptToUse = opts.initialPrompt ?? opts.prompt;
+    const strategy = computeLanguageStrategy(opts.lang, audioDurationMs, promptToUse);
 
     // 5. Segment long recordings at silence boundaries (prevents dropped audio)
     let segments: AudioSegment[] = [];
@@ -138,6 +139,7 @@ export async function transcribe(uri: string, opts: AsrOptions): Promise<AsrResu
     // 6. Run inference per segment (single pass for short clips)
     const transcriptParts: string[] = [];
     const langCounts: Record<'en' | 'hi', number> = { en: 0, hi: 0 };
+    let lastError: unknown = null;
 
     for (const segment of segmentList) {
       const segmentDurationMs = Math.max(segment.endMs - segment.startMs, 1);
@@ -168,11 +170,16 @@ export async function transcribe(uri: string, opts: AsrOptions): Promise<AsrResu
           logger.warn('ASR', `Segment [${segment.startMs}ms - ${segment.endMs}ms] returned empty transcription`);
         }
       } catch (segErr) {
+        lastError = segErr;
         logger.warn('ASR', `Segment [${segment.startMs}ms - ${segment.endMs}ms] inference failed`, segErr);
       } finally {
         // Prime directive: delete every temp segment file immediately after ASR.
         cleanup?.();
       }
+    }
+
+    if (transcriptParts.length === 0 && lastError) {
+      throw lastError;
     }
 
     // 7. Merge, normalize, and validate output

@@ -196,6 +196,23 @@ export const SettingsScreen: React.FC = () => {
           />
         </View>
 
+        {/* Auto-copy to Clipboard Switch */}
+        <View
+          style={[styles.switchRow, { backgroundColor: theme.surface, borderColor: theme.border }]}
+        >
+          <View style={{ flex: 1, marginRight: 12 }}>
+            <Text style={[styles.switchLabel, { color: theme.textPrimary }]}>Auto-copy to Clipboard</Text>
+            <Text style={{ fontSize: 12, color: theme.textMuted, marginTop: 2 }}>
+              Automatically copy tone-rewritten notes to clipboard ready to paste
+            </Text>
+          </View>
+          <Switch
+            value={settings.autoCopyToClipboard}
+            onValueChange={settings.setAutoCopyToClipboard}
+            trackColor={{ false: theme.surfaceSubtle, true: theme.primary }}
+          />
+        </View>
+
         {/* Privacy & Guarantees Link */}
         <TouchableOpacity
           style={[styles.menuItem, { backgroundColor: theme.surface, borderColor: theme.border }]}

@@ -26,9 +26,16 @@ function copyFileSync(src, dest) {
 }
 
 function statSync(filePath) {
-  const content = memFiles.get(filePath) || '';
+  const content = memFiles.get(filePath);
+  if (content !== undefined) {
+    return {
+      size: typeof content === 'string' ? content.length : (content.byteLength || 0),
+      isFile: () => true,
+      isDirectory: () => false,
+    };
+  }
   return {
-    size: typeof content === 'string' ? content.length : (content.byteLength || 0),
+    size: typeof filePath === 'string' && filePath.length > 0 ? 1024 : 0,
     isFile: () => true,
     isDirectory: () => false,
   };

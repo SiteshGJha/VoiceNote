@@ -70,7 +70,11 @@ class AudioRecorderService {
           }
         }
       });
-      await nativeAudio.startRecording();
+      if (typeof nativeAudio.startRollingRecording === 'function') {
+        await nativeAudio.startRollingRecording({ maxDurationMs: 300000 });
+      } else {
+        await nativeAudio.startRecording();
+      }
       return;
     }
 
@@ -89,23 +93,35 @@ class AudioRecorderService {
       return null;
     }
 
-    // Stop worker capture so synthetic simulation doesn't inject random noise
-    if (this.workerUnsubscribe) {
-      this.workerUnsubscribe();
-      this.workerUnsubscribe = null;
-    }
-    await audioWorker.stopCapture();
-
-    // Tail hangover: capture any trailing phonemes/words before cutoff
-    await new Promise((resolve) => setTimeout(resolve, TAIL_HANGOVER_MS));
-
-    this.state = 'processing';
-    if (this.nativeMeteringUnsubscribe) {
-      this.nativeMeteringUnsubscribe();
-      this.nativeMeteringUnsubscribe = null;
-    }
-
     if (nativeAudio.isNativeAvailable) {
+      this.state = 'processing';
+      if (this.nativeMeteringUnsubscribe) {
+        this.nativeMeteringUnsubscribe();
+        this.nativeMeteringUnsubscribe = null;
+      }
+
+      if (typeof nativeAudio.stopRollingRecording === 'function') {
+        const nativeRolling = await nativeAudio.stopRollingRecording();
+        this.state = 'idle';
+        if (!nativeRolling) {
+          return null;
+        }
+        const trailingChunk = nativeRolling.trailingChunk || null;
+        const trailingUri = trailingChunk?.uri || '';
+        this.currentTempUri = trailingUri;
+        const durationMs = nativeRolling.totalDurationMs || (trailingChunk?.durationMs ?? 0);
+        const hasSpeech = (trailingChunk && trailingChunk.durationMs > 100) || durationMs > 500;
+        return {
+          uri: trailingUri,
+          durationMs,
+          sampleRate: SAMPLE_RATE,
+          channels: 1,
+          byteLength: 0,
+          hasSpeech,
+          trailingChunk,
+        };
+      }
+
       const nativeResult = await nativeAudio.stopRecording();
       this.state = 'idle';
       if (!nativeResult || !nativeResult.uri) {
@@ -121,6 +137,18 @@ class AudioRecorderService {
         hasSpeech: nativeResult.hasSpeech,
       };
     }
+
+    // Stop worker capture so synthetic simulation doesn't inject random noise
+    if (this.workerUnsubscribe) {
+      this.workerUnsubscribe();
+      this.workerUnsubscribe = null;
+    }
+    await audioWorker.stopCapture();
+
+    // Tail hangover: capture any trailing phonemes/words before cutoff
+    await new Promise((resolve) => setTimeout(resolve, TAIL_HANGOVER_MS));
+
+    this.state = 'processing';
 
     await audioWorker.stopCapture();
 
@@ -196,7 +224,11 @@ class AudioRecorderService {
       this.workerUnsubscribe = null;
     }
     if (nativeAudio.isNativeAvailable) {
-      await nativeAudio.cancelRecording();
+      if (typeof nativeAudio.cancelRollingRecording === 'function') {
+        await nativeAudio.cancelRollingRecording();
+      } else {
+        await nativeAudio.cancelRecording();
+      }
     } else {
       await audioWorker.stopCapture();
     }
@@ -204,6 +236,39 @@ class AudioRecorderService {
     this.totalByteLength = 0;
     await this.cleanupTempFile();
     this.state = 'idle';
+  }
+
+  /**
+   * Initializes audio service and sweeps temporary directory for stranded audio chunks.
+   */
+  public async init(): Promise<void> {
+    await this.cleanupOrphanedChunks();
+  }
+
+  /**
+   * Startup sanitation sweep: deletes any stranded voicenote_chunk_*.wav files
+   * left behind by previous aborted sessions or app crashes.
+   */
+  public async cleanupOrphanedChunks(): Promise<void> {
+    try {
+      const tempDir = os.tmpdir();
+      if (fs.existsSync(tempDir)) {
+        const files = fs.readdirSync(tempDir);
+        for (const file of files) {
+          if (file.startsWith('voicenote_chunk_') && file.endsWith('.wav')) {
+            const fullPath = path.join(tempDir, file);
+            try {
+              fs.unlinkSync(fullPath);
+              logger.info('AudioRecorder', `Sanitation sweep deleted orphaned chunk: ${fullPath}`);
+            } catch (err) {
+              logger.warn('AudioRecorder', `Failed to delete orphaned chunk: ${fullPath}`, err);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn('AudioRecorder', 'Failed during startup orphaned chunk sanitation sweep', err);
+    }
   }
 
   /**

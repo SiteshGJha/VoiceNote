@@ -71,6 +71,9 @@ function createDefaultMockInstance(): IRustCoreHybridObject {
       } else if (prompt?.includes('Hindi') || prompt?.includes('Hinglish')) {
         mockTranscript = 'Meeting kal subah 10 baje scheduled hai.';
         detected = 'en';
+      } else if (prompt?.includes('seam_prompt:')) {
+        mockTranscript = `continued after ${prompt.replace('seam_prompt:', '').trim()}`;
+        detected = 'en';
       }
 
       return {

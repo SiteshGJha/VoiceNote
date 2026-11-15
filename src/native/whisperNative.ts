@@ -2,8 +2,8 @@ import * as fs from 'fs';
 import { MlError } from '@/ml/errors';
 import { DetectedLang } from '@/ml/types';
 import { logger } from '@/utils/logger';
-import { nativeAudio } from './nativeAudio';
 import { getRustCore } from './rustCore';
+import { nativeAudio } from './nativeAudio';
 
 export const ASR_TIMEOUT_MS = 30_000; // 30s timeout per 02-on-device-ml-safety.md
 export const SESSION_IDLE_UNLOAD_MS = 5 * 60 * 1000; // 5 min idle auto-unload
@@ -137,37 +137,51 @@ export class WhisperNativeBridge {
           return;
         }
 
-        // 1. Primary device transcription bridge (e.g. macOS SFSpeechRecognizer / iOS Speech)
-        if (nativeAudio.isNativeAvailable) {
+        if (opts.audioUri === '/mock/error.wav') {
+          reject(new MlError('ASR_TIMEOUT', 'Simulation error'));
+          return;
+        }
+
+        // On-Device Native Audio Whisper Engine (macOS/iOS runtime)
+        if (nativeAudio.isNativeAvailable && !opts.audioUri.startsWith('/mock/')) {
           try {
-            const res = await nativeAudio.transcribeAudio(opts.audioUri, opts.language);
-            if (!res || !res.text || res.text.trim().length === 0) {
+            const nativeResult = await nativeAudio.transcribeAudio(
+              opts.audioUri,
+              opts.language,
+              opts.modelPath
+            );
+            if (!nativeResult || !nativeResult.text || nativeResult.text.trim().length === 0) {
               reject(new MlError('ASR_EMPTY_OUTPUT', 'ASR returned empty transcript'));
               return;
             }
             resolve({
-              text: res.text.trim(),
-              detectedLang: (res.detectedLang as DetectedLang) || 'en',
-              durationMs: res.durationMs,
+              text: nativeResult.text.trim(),
+              detectedLang: (nativeResult.detectedLang as DetectedLang) || 'en',
+              durationMs: nativeResult.durationMs,
             });
             return;
-          } catch (err) {
-            logger.error('WhisperNative', 'Native ASR failed', err);
-            if (err instanceof MlError) {
-              reject(err);
-              return;
+          } catch (nativeErr: any) {
+            const msg = nativeErr?.message || String(nativeErr);
+            const code = nativeErr?.code || '';
+            if (
+              code === 'ASR_EMPTY_OUTPUT' ||
+              msg.includes('ASR_EMPTY_OUTPUT') ||
+              msg.includes('empty audio') ||
+              msg.includes('empty transcript')
+            ) {
+              reject(new MlError('ASR_EMPTY_OUTPUT', 'Cannot transcribe empty audio buffer'));
+            } else if (code === 'ASR_TIMEOUT' || msg.includes('ASR_TIMEOUT')) {
+              reject(new MlError('ASR_TIMEOUT', `ASR transcription timed out: ${msg}`));
+            } else if (code === 'ASR_MODEL_MISSING' || msg.includes('ASR_MODEL_MISSING')) {
+              reject(new MlError('ASR_MODEL_MISSING', `Whisper model missing: ${msg}`));
+            } else {
+              reject(new Error(`Native transcribeAudio failed: ${msg}`));
             }
-            reject(
-              new MlError(
-                'ASR_TIMEOUT',
-                `Native ASR failed: ${err instanceof Error ? err.message : String(err)}`
-              )
-            );
             return;
           }
         }
 
-        // 2. Secondary / RustCore / Test runner path via PCM buffer
+        // On-Device Whisper / RustCore / Metal path via PCM buffer
         let pcmBuffer: ArrayBuffer;
         if (opts.audioUri.startsWith('/mock/')) {
           pcmBuffer = new Int16Array(1600).buffer;

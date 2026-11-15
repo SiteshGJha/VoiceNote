@@ -50,6 +50,9 @@
 #import <Speech/Speech.h>
 #import <CommonCrypto/CommonDigest.h>
 #import <dlfcn.h>
+#include <vector>
+#include <algorithm>
+#include "voicenote_core.h"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
@@ -64,8 +67,17 @@
   NSDate *_recordStartTime;
   float _maxLinearAmplitude;
   BOOL _hasListeners;
-  id _speechRecognizer;
-  id _currentRecognitionTask;
+  
+  // Rolling live capture
+  NSString *_rollingSessionId;
+  int _rollingChunkIndex;
+  NSTimeInterval _rollingSessionStartTime;
+  NSTimeInterval _currentChunkStartTime;
+  NSTimer *_rollingMonitorTimer;
+  NSTimer *_ceilingTimer;
+  BOOL _isRollingRecording;
+  float _currentSilenceDuration;
+  NSDictionary *_lastRollingResult;
 }
 
 RCT_EXPORT_MODULE(VoiceNoteNativeAudio);
@@ -75,7 +87,7 @@ RCT_EXPORT_MODULE(VoiceNoteNativeAudio);
 }
 
 - (NSArray<NSString *> *)supportedEvents {
-  return @[@"onAudioMetering"];
+  return @[@"onAudioMetering", @"onChunkReady", @"onCeilingReached"];
 }
 
 - (void)startObserving {
@@ -88,87 +100,86 @@ RCT_EXPORT_MODULE(VoiceNoteNativeAudio);
 
 RCT_EXPORT_METHOD(startRecording:(RCTPromiseResolveBlock)resolve
                  rejecter:(RCTPromiseRejectBlock)reject) {
-  dispatch_async(dispatch_get_main_queue(), ^{
-    AVAuthorizationStatus micStatus = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio];
-    if (micStatus == AVAuthorizationStatusDenied || micStatus == AVAuthorizationStatusRestricted) {
-      NSLog(@"[VoiceNoteNativeAudio] Microphone permission is denied or restricted.");
-      reject(@"AUDIO_PERMISSION_DENIED", @"Microphone access denied in macOS System Settings.", nil);
-      return;
-    }
-    
-    if (self->_audioRecorder && self->_audioRecorder.isRecording) {
-      [self->_audioRecorder stop];
-    }
-    
-    NSString *tempDir = NSTemporaryDirectory();
-    long long timestamp = (long long)([[NSDate date] timeIntervalSince1970] * 1000);
-    NSString *fileName = [NSString stringWithFormat:@"voicenote_rec_%lld.wav", timestamp];
-    self->_currentAudioPath = [tempDir stringByAppendingPathComponent:fileName];
-    NSURL *fileURL = [NSURL fileURLWithPath:self->_currentAudioPath];
-    
-    NSDictionary *settings = @{
-      AVFormatIDKey: @(kAudioFormatLinearPCM),
-      AVSampleRateKey: @(16000.0),
-      AVNumberOfChannelsKey: @(1),
-      AVLinearPCMBitDepthKey: @(16),
-      AVLinearPCMIsBigEndianKey: @(NO),
-      AVLinearPCMIsFloatKey: @(NO)
-    };
-    
-    NSError *error = nil;
-    self->_audioRecorder = [[AVAudioRecorder alloc] initWithURL:fileURL settings:settings error:&error];
-    if (error || !self->_audioRecorder) {
-      NSLog(@"[VoiceNoteNativeAudio] Failed to initialize audio recorder: %@", error);
-      reject(@"AUDIO_INIT_FAILED", [NSString stringWithFormat:@"Failed to create audio recorder: %@", error.localizedDescription], error);
-      return;
-    }
-    
-    self->_audioRecorder.meteringEnabled = YES;
-    if (![self->_audioRecorder record]) {
-      NSLog(@"[VoiceNoteNativeAudio] Failed to start recording.");
-      reject(@"AUDIO_RECORD_FAILED", @"Failed to start audio recording.", nil);
-      return;
-    }
-    
-    self->_recordStartTime = [NSDate date];
-    self->_maxLinearAmplitude = 0.0f;
-    NSLog(@"[VoiceNoteNativeAudio] Recording started to: %@", self->_currentAudioPath);
-    
-    [self->_meteringTimer invalidate];
-    self->_meteringTimer = [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer * _Nonnull timer) {
-      if (!self->_audioRecorder || !self->_audioRecorder.isRecording) {
-        return;
-      }
-      [self->_audioRecorder updateMeters];
-      float avgDb = [self->_audioRecorder averagePowerForChannel:0];
-      // Convert dB (-60 to 0) to linear 0.0 to 1.0
-      float linear = 0.0f;
-      if (avgDb > -60.0f) {
-        linear = powf(10.0f, avgDb / 20.0f);
-      }
-      if (linear > self->_maxLinearAmplitude) {
-        self->_maxLinearAmplitude = linear;
-      }
-      if (self->_hasListeners) {
-        [self sendEventWithName:@"onAudioMetering" body:@{
-          @"amplitude": @(linear),
-          @"rawRms": @(linear),
-          @"peak": @(linear * 1.414f)
-        }];
-      }
-    }];
-    
-    resolve(@(YES));
-  });
+  [self startRollingRecording:@{} resolver:resolve rejecter:reject];
 }
 
 RCT_EXPORT_METHOD(stopRecording:(RCTPromiseResolveBlock)resolve
                  rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{
+    if (self->_isRollingRecording) {
+      [self->_ceilingTimer invalidate];
+      self->_ceilingTimer = nil;
+      [self->_rollingMonitorTimer invalidate];
+      self->_rollingMonitorTimer = nil;
+      [self->_meteringTimer invalidate];
+      self->_meteringTimer = nil;
+
+      self->_isRollingRecording = NO;
+      if (self->_audioRecorder) {
+        [self->_audioRecorder stop];
+        self->_audioRecorder = nil;
+      }
+
+      NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+      NSTimeInterval totalDuration = now - self->_rollingSessionStartTime;
+      NSTimeInterval trailingDuration = now - self->_currentChunkStartTime;
+
+      unsigned long long trailingSize = 0;
+      if (self->_currentAudioPath && [[NSFileManager defaultManager] fileExistsAtPath:self->_currentAudioPath]) {
+        NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:self->_currentAudioPath error:nil];
+        trailingSize = [attrs fileSize];
+      }
+
+      NSDictionary *trailingChunk = nil;
+      if (trailingSize > 44 && trailingDuration > 0.05) {
+        trailingChunk = @{
+          @"uri": self->_currentAudioPath ?: @"",
+          @"durationMs": @((int)(trailingDuration * 1000)),
+          @"index": @(self->_rollingChunkIndex)
+        };
+      }
+
+      BOOL hasSpeech = (self->_maxLinearAmplitude >= 0.025f) || (self->_rollingChunkIndex > 0);
+
+      NSDictionary *rollingResult = @{
+        @"sessionId": self->_rollingSessionId ?: @"",
+        @"totalDurationMs": @((int)(totalDuration * 1000)),
+        @"trailingChunk": trailingChunk ?: [NSNull null]
+      };
+      self->_lastRollingResult = rollingResult;
+
+      resolve(@{
+        @"uri": self->_currentAudioPath ?: @"",
+        @"durationMs": @((int)(totalDuration * 1000)),
+        @"byteLength": @(trailingSize),
+        @"hasSpeech": @(hasSpeech),
+        @"sampleRate": @(16000),
+        @"channels": @(1),
+        @"sessionId": self->_rollingSessionId ?: @"",
+        @"trailingChunk": trailingChunk ?: [NSNull null]
+      });
+      return;
+    }
+
     [self->_meteringTimer invalidate];
     self->_meteringTimer = nil;
     
     if (!self->_audioRecorder) {
+      if (self->_lastRollingResult != nil) {
+        NSDictionary *trailingChunk = self->_lastRollingResult[@"trailingChunk"];
+        NSString *uri = (trailingChunk && ![trailingChunk isKindOfClass:[NSNull class]]) ? trailingChunk[@"uri"] : @"";
+        resolve(@{
+          @"uri": uri ?: @"",
+          @"durationMs": self->_lastRollingResult[@"totalDurationMs"] ?: @(0),
+          @"byteLength": @(0),
+          @"hasSpeech": @(YES),
+          @"sampleRate": @(16000),
+          @"channels": @(1),
+          @"sessionId": self->_lastRollingResult[@"sessionId"] ?: @"",
+          @"trailingChunk": trailingChunk ?: [NSNull null]
+        });
+        return;
+      }
       reject(@"AUDIO_NOT_RECORDING", @"No active recording found.", nil);
       return;
     }
@@ -188,7 +199,6 @@ RCT_EXPORT_METHOD(stopRecording:(RCTPromiseResolveBlock)resolve
       fileSize = [attrs fileSize];
     }
     
-    // Normal human speech into mic reaches > 0.025 linear amplitude (approx -32dB) and has non-empty payload
     BOOL hasSpeech = (self->_maxLinearAmplitude >= 0.025f) && (fileSize > 4096);
     NSLog(@"[VoiceNoteNativeAudio] Stop recording. Duration: %.2fs, FileSize: %llu bytes, MaxAmp: %.4f, hasSpeech: %d", duration, fileSize, self->_maxLinearAmplitude, hasSpeech);
     
@@ -205,266 +215,376 @@ RCT_EXPORT_METHOD(stopRecording:(RCTPromiseResolveBlock)resolve
 
 RCT_EXPORT_METHOD(cancelRecording:(RCTPromiseResolveBlock)resolve
                  rejecter:(RCTPromiseRejectBlock)reject) {
+  [self cancelRollingRecording:resolve rejecter:reject];
+}
+
+RCT_EXPORT_METHOD(startRollingRecording:(NSDictionary *)options
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{
+    AVAuthorizationStatus micStatus = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio];
+    if (micStatus == AVAuthorizationStatusDenied || micStatus == AVAuthorizationStatusRestricted) {
+      NSLog(@"[VoiceNoteNativeAudio] Microphone permission is denied or restricted.");
+      reject(@"AUDIO_PERMISSION_DENIED", @"Microphone access denied in macOS System Settings.", nil);
+      return;
+    }
+
     [self->_meteringTimer invalidate];
     self->_meteringTimer = nil;
-    
+    [self->_rollingMonitorTimer invalidate];
+    self->_rollingMonitorTimer = nil;
+    [self->_ceilingTimer invalidate];
+    self->_ceilingTimer = nil;
+
+    if (self->_audioRecorder && self->_audioRecorder.isRecording) {
+      [self->_audioRecorder stop];
+      self->_audioRecorder = nil;
+    }
+
+    self->_isRollingRecording = YES;
+    self->_rollingSessionId = [NSString stringWithFormat:@"session_%lld", (long long)([[NSDate date] timeIntervalSince1970] * 1000)];
+    self->_rollingChunkIndex = 0;
+    self->_rollingSessionStartTime = [[NSDate date] timeIntervalSince1970];
+    self->_currentChunkStartTime = self->_rollingSessionStartTime;
+    self->_currentSilenceDuration = 0.0f;
+    self->_maxLinearAmplitude = 0.0f;
+
+    NSString *tempDir = NSTemporaryDirectory();
+    NSString *fileName = [NSString stringWithFormat:@"voicenote_chunk_%@_%d.wav", self->_rollingSessionId, self->_rollingChunkIndex];
+    self->_currentAudioPath = [tempDir stringByAppendingPathComponent:fileName];
+    NSURL *fileURL = [NSURL fileURLWithPath:self->_currentAudioPath];
+
+    NSDictionary *settings = @{
+      AVFormatIDKey: @(kAudioFormatLinearPCM),
+      AVSampleRateKey: @(16000.0),
+      AVNumberOfChannelsKey: @(1),
+      AVLinearPCMBitDepthKey: @(16),
+      AVLinearPCMIsBigEndianKey: @(NO),
+      AVLinearPCMIsFloatKey: @(NO)
+    };
+
+    NSError *error = nil;
+    self->_audioRecorder = [[AVAudioRecorder alloc] initWithURL:fileURL settings:settings error:&error];
+    if (error || !self->_audioRecorder) {
+      NSLog(@"[VoiceNoteNativeAudio] Failed to initialize rolling audio recorder: %@", error);
+      reject(@"AUDIO_INIT_FAILED", [NSString stringWithFormat:@"Failed to create rolling audio recorder: %@", error.localizedDescription], error);
+      return;
+    }
+
+    self->_audioRecorder.meteringEnabled = YES;
+    if (![self->_audioRecorder record]) {
+      NSLog(@"[VoiceNoteNativeAudio] Failed to start rolling recording.");
+      reject(@"AUDIO_RECORD_FAILED", @"Failed to start rolling audio recording.", nil);
+      return;
+    }
+
+    NSLog(@"[VoiceNoteNativeAudio] Rolling recording started. Session=%@, Chunk 0=%@", self->_rollingSessionId, self->_currentAudioPath);
+
+    // Safety ceiling timer: default 300.0s (5 minutes)
+    double maxDurationSec = 300.0;
+    if (options && options[@"maxDurationMs"] && [options[@"maxDurationMs"] doubleValue] > 0) {
+      maxDurationSec = [options[@"maxDurationMs"] doubleValue] / 1000.0;
+    }
+    self->_ceilingTimer = [NSTimer scheduledTimerWithTimeInterval:maxDurationSec repeats:NO block:^(NSTimer * _Nonnull timer) {
+      NSLog(@"[VoiceNoteNativeAudio] Rolling recording hit safety ceiling (%.1fs). Dispatching onCeilingReached.", maxDurationSec);
+      if (self->_hasListeners) {
+        [self sendEventWithName:@"onCeilingReached" body:@{}];
+      }
+    }];
+
+    // Rolling monitor and metering timer (50ms)
+    self->_rollingMonitorTimer = [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer * _Nonnull timer) {
+      if (!self->_audioRecorder || !self->_audioRecorder.isRecording) {
+        return;
+      }
+      [self->_audioRecorder updateMeters];
+      float avgDb = [self->_audioRecorder averagePowerForChannel:0];
+      float linear = 0.0f;
+      if (avgDb > -60.0f) {
+        linear = powf(10.0f, avgDb / 20.0f);
+      }
+      if (linear > self->_maxLinearAmplitude) {
+        self->_maxLinearAmplitude = linear;
+      }
+      if (self->_hasListeners) {
+        [self sendEventWithName:@"onAudioMetering" body:@{
+          @"amplitude": @(linear),
+          @"rawRms": @(linear),
+          @"peak": @(linear * 1.414f)
+        }];
+      }
+
+      // Silence boundary evaluation: RMS < -36 dBFS (~0.0158 linear)
+      if (linear < 0.0158f) {
+        self->_currentSilenceDuration += 0.05f;
+      } else {
+        self->_currentSilenceDuration = 0.0f;
+      }
+
+      NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+      NSTimeInterval chunkElapsed = now - self->_currentChunkStartTime;
+
+      // Slice at silence midpoint (>= 20s and >= 350ms silence) or hard ceiling at 25s
+      if ((chunkElapsed >= 20.0 && self->_currentSilenceDuration >= 0.35f) || (chunkElapsed >= 25.0)) {
+        NSLog(@"[VoiceNoteNativeAudio] Slicing chunk %d at %.2fs (silence=%.2fs)", self->_rollingChunkIndex, chunkElapsed, self->_currentSilenceDuration);
+        
+        [self->_audioRecorder stop];
+        NSString *completedChunkPath = self->_currentAudioPath;
+        int completedIndex = self->_rollingChunkIndex;
+
+        if (self->_hasListeners) {
+          [self sendEventWithName:@"onChunkReady" body:@{
+            @"sessionId": self->_rollingSessionId ?: @"",
+            @"chunk": @{
+              @"uri": completedChunkPath ?: @"",
+              @"durationMs": @((int)(chunkElapsed * 1000)),
+              @"index": @(completedIndex)
+            }
+          }];
+        }
+
+        self->_rollingChunkIndex++;
+        self->_currentChunkStartTime = [[NSDate date] timeIntervalSince1970];
+        self->_currentSilenceDuration = 0.0f;
+
+        NSString *nextChunkName = [NSString stringWithFormat:@"voicenote_chunk_%@_%d.wav", self->_rollingSessionId, self->_rollingChunkIndex];
+        self->_currentAudioPath = [tempDir stringByAppendingPathComponent:nextChunkName];
+        NSURL *nextURL = [NSURL fileURLWithPath:self->_currentAudioPath];
+
+        NSError *nextErr = nil;
+        self->_audioRecorder = [[AVAudioRecorder alloc] initWithURL:nextURL settings:settings error:&nextErr];
+        if (!nextErr && self->_audioRecorder) {
+          self->_audioRecorder.meteringEnabled = YES;
+          [self->_audioRecorder record];
+        } else {
+          NSLog(@"[VoiceNoteNativeAudio] Failed to start next chunk recorder: %@", nextErr);
+        }
+      }
+    }];
+
+    resolve(@(YES));
+  });
+}
+
+RCT_EXPORT_METHOD(stopRollingRecording:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self->_ceilingTimer invalidate];
+    self->_ceilingTimer = nil;
+    [self->_rollingMonitorTimer invalidate];
+    self->_rollingMonitorTimer = nil;
+    [self->_meteringTimer invalidate];
+    self->_meteringTimer = nil;
+
+    if (!self->_isRollingRecording && !self->_audioRecorder) {
+      if (self->_lastRollingResult != nil) {
+        resolve(self->_lastRollingResult);
+        self->_lastRollingResult = nil;
+        return;
+      }
+      resolve(@{
+        @"sessionId": self->_rollingSessionId ?: @"",
+        @"totalDurationMs": @(0),
+        @"trailingChunk": [NSNull null]
+      });
+      return;
+    }
+
+    self->_isRollingRecording = NO;
     if (self->_audioRecorder) {
       [self->_audioRecorder stop];
       self->_audioRecorder = nil;
     }
-    
+
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    NSTimeInterval totalDuration = now - self->_rollingSessionStartTime;
+    NSTimeInterval trailingDuration = now - self->_currentChunkStartTime;
+
+    unsigned long long trailingSize = 0;
     if (self->_currentAudioPath && [[NSFileManager defaultManager] fileExistsAtPath:self->_currentAudioPath]) {
-      [[NSFileManager defaultManager] removeItemAtPath:self->_currentAudioPath error:nil];
+      NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:self->_currentAudioPath error:nil];
+      trailingSize = [attrs fileSize];
     }
+
+    NSDictionary *trailingChunk = nil;
+    if (trailingSize > 44 && trailingDuration > 0.05) {
+      trailingChunk = @{
+        @"uri": self->_currentAudioPath ?: @"",
+        @"durationMs": @((int)(trailingDuration * 1000)),
+        @"index": @(self->_rollingChunkIndex)
+      };
+    }
+
+    NSLog(@"[VoiceNoteNativeAudio] Stop rolling recording. Total: %.2fs, Trailing chunk: %d (%.2fs, %llu bytes)",
+          totalDuration, self->_rollingChunkIndex, trailingDuration, trailingSize);
+
+    NSDictionary *result = @{
+      @"sessionId": self->_rollingSessionId ?: @"",
+      @"totalDurationMs": @((int)(totalDuration * 1000)),
+      @"trailingChunk": trailingChunk ?: [NSNull null]
+    };
+    self->_lastRollingResult = result;
+    resolve(result);
+  });
+}
+
+RCT_EXPORT_METHOD(cancelRollingRecording:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self->_ceilingTimer invalidate];
+    self->_ceilingTimer = nil;
+    [self->_rollingMonitorTimer invalidate];
+    self->_rollingMonitorTimer = nil;
+    [self->_meteringTimer invalidate];
+    self->_meteringTimer = nil;
+
+    self->_isRollingRecording = NO;
+    self->_lastRollingResult = nil;
+    if (self->_audioRecorder) {
+      [self->_audioRecorder stop];
+      self->_audioRecorder = nil;
+    }
+
+    // Clean up all chunk files belonging to current session
+    if (self->_rollingSessionId) {
+      NSString *tempDir = NSTemporaryDirectory();
+      NSString *prefix = [NSString stringWithFormat:@"voicenote_chunk_%@", self->_rollingSessionId];
+      NSArray<NSString *> *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:tempDir error:nil];
+      for (NSString *file in files) {
+        if ([file hasPrefix:prefix]) {
+          NSString *filePath = [tempDir stringByAppendingPathComponent:file];
+          [[NSFileManager defaultManager] removeItemAtPath:filePath error:nil];
+        }
+      }
+    }
+
     self->_currentAudioPath = nil;
-    
+    self->_rollingSessionId = nil;
     resolve(@(YES));
   });
 }
 
 RCT_EXPORT_METHOD(transcribeAudio:(NSString *)filePath
                  language:(NSString *)language
+                 modelPath:(NSString *)modelPath
                  resolver:(RCTPromiseResolveBlock)resolve
                  rejecter:(RCTPromiseRejectBlock)reject) {
-  if (!filePath || ![[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
-    reject(@"AUDIO_FILE_MISSING", [NSString stringWithFormat:@"Audio file does not exist at %@", filePath], nil);
+  if (!filePath || filePath.length == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
+    reject(@"AUDIO_RECORD_FAILED", [NSString stringWithFormat:@"Audio file does not exist at URI: %@", filePath], nil);
     return;
   }
-  
-  static dispatch_once_t onceToken;
-  dispatch_once(&onceToken, ^{
-    dlopen("/System/Library/Frameworks/Speech.framework/Speech", RTLD_LAZY);
-  });
-  
-  Class SpeechRecognizerClass = NSClassFromString(@"SFSpeechRecognizer");
-  Class SpeechURLRequestClass = NSClassFromString(@"SFSpeechURLRecognitionRequest");
-  
-  if (!SpeechRecognizerClass || !SpeechURLRequestClass) {
-    [[NSFileManager defaultManager] removeItemAtPath:filePath error:nil];
-    reject(@"ASR_UNAVAILABLE", @"Speech recognition framework is not available on this macOS version.", nil);
+
+  NSString *effectiveModelPath = (modelPath && [modelPath isKindOfClass:[NSString class]] && modelPath.length > 0) ? [modelPath stringByExpandingTildeInPath] : nil;
+  if (!effectiveModelPath || ![[NSFileManager defaultManager] fileExistsAtPath:effectiveModelPath]) {
+    NSString *fallbackPath = [NSHomeDirectory() stringByAppendingPathComponent:@".voicenote/models/asr/whisper-base-multilingual-Q5_1.gguf"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:fallbackPath]) {
+      effectiveModelPath = fallbackPath;
+    }
+  }
+
+  if (!effectiveModelPath || ![[NSFileManager defaultManager] fileExistsAtPath:effectiveModelPath]) {
+    NSLog(@"[VoiceNoteNativeAudio] Whisper model missing at %@", effectiveModelPath);
+    reject(@"ASR_MODEL_MISSING", @"Whisper GGUF model not found on disk. Please download it first.", nil);
     return;
   }
-  
-  typedef void (^SFAuthHandler)(NSInteger status);
-  SEL reqAuthSel = NSSelectorFromString(@"requestAuthorization:");
-  NSMethodSignature *sig = [SpeechRecognizerClass methodSignatureForSelector:reqAuthSel];
-  if (!sig) {
-    [[NSFileManager defaultManager] removeItemAtPath:filePath error:nil];
-    reject(@"ASR_UNAVAILABLE", @"Speech authorization selector not found.", nil);
-    return;
-  }
-  
-  void (*requestAuth)(id, SEL, SFAuthHandler) = (void (*)(id, SEL, SFAuthHandler))[SpeechRecognizerClass methodForSelector:reqAuthSel];
-  
-  requestAuth(SpeechRecognizerClass, reqAuthSel, ^(NSInteger status) {
-    // 3 = SFSpeechRecognizerAuthorizationStatusAuthorized
-    if (status != 3) {
-      [[NSFileManager defaultManager] removeItemAtPath:filePath error:nil];
-      NSLog(@"[VoiceNoteNativeAudio] Speech authorization failed: status=%ld", (long)status);
-      reject(@"ASR_PERMISSION_DENIED", @"Speech recognition permission was not granted by the user.", nil);
+
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    NSData *audioData = [NSData dataWithContentsOfFile:filePath];
+    if (!audioData || audioData.length == 0) {
+      reject(@"ASR_EMPTY_OUTPUT", @"Cannot transcribe empty audio buffer", nil);
       return;
     }
-    
-    NSString *localeId = [language isEqualToString:@"hi"] ? @"hi-IN" : @"en-US";
-    NSLocale *locale = [NSLocale localeWithLocaleIdentifier:localeId];
-    id recognizer = [[SpeechRecognizerClass alloc] performSelector:NSSelectorFromString(@"initWithLocale:") withObject:locale];
-    
-    BOOL isAvailable = NO;
-    if (recognizer && [recognizer respondsToSelector:NSSelectorFromString(@"isAvailable")]) {
-      NSInvocation *inv = [NSInvocation invocationWithMethodSignature:[recognizer methodSignatureForSelector:NSSelectorFromString(@"isAvailable")]];
-      [inv setSelector:NSSelectorFromString(@"isAvailable")];
-      [inv setTarget:recognizer];
-      [inv invoke];
-      [inv getReturnValue:&isAvailable];
+
+    const uint8_t *bytes = (const uint8_t *)[audioData bytes];
+    NSUInteger totalBytes = [audioData length];
+    NSUInteger dataOffset = 44;
+    NSUInteger pcmBytesLen = 0;
+
+    if (totalBytes >= 12 && memcmp(bytes, "RIFF", 4) == 0 && memcmp(bytes + 8, "WAVE", 4) == 0) {
+      for (NSUInteger i = 12; i + 8 <= totalBytes; ) {
+        if (memcmp(bytes + i, "data", 4) == 0) {
+          uint32_t chunkSize = *(const uint32_t *)(bytes + i + 4);
+          dataOffset = i + 8;
+          pcmBytesLen = MIN((NSUInteger)chunkSize, totalBytes - dataOffset);
+          break;
+        }
+        uint32_t chunkSize = *(const uint32_t *)(bytes + i + 4);
+        i += 8 + chunkSize;
+      }
+    } else {
+      dataOffset = 0;
+      pcmBytesLen = totalBytes;
     }
-    
-    if (!recognizer || !isAvailable) {
-      recognizer = [[SpeechRecognizerClass alloc] performSelector:NSSelectorFromString(@"initWithLocale:") withObject:[NSLocale currentLocale]];
-    }
-    
-    if (!recognizer) {
-      [[NSFileManager defaultManager] removeItemAtPath:filePath error:nil];
-      NSLog(@"[VoiceNoteNativeAudio] Speech recognizer not available");
-      reject(@"ASR_MODEL_MISSING", @"Speech recognizer is not available on this device.", nil);
+
+    if (dataOffset >= totalBytes || pcmBytesLen == 0) {
+      reject(@"ASR_EMPTY_OUTPUT", @"Cannot transcribe empty audio buffer", nil);
       return;
     }
-    
-    // Retain speech recognizer instance to prevent premature deallocation during async task
-    self->_speechRecognizer = recognizer;
-    
-    NSURL *fileURL = [NSURL fileURLWithPath:filePath];
-    id request = [[SpeechURLRequestClass alloc] performSelector:NSSelectorFromString(@"initWithURL:") withObject:fileURL];
-    
-    // Dictation task hint (enables continuous multi-sentence dictation instead of short queries)
-    if ([request respondsToSelector:NSSelectorFromString(@"setTaskHint:")]) {
-      NSInteger taskHint = 1; // SFSpeechRecognitionTaskHintDictation
-      NSInvocation *inv = [NSInvocation invocationWithMethodSignature:[request methodSignatureForSelector:NSSelectorFromString(@"setTaskHint:")]];
-      [inv setSelector:NSSelectorFromString(@"setTaskHint:")];
-      [inv setTarget:request];
-      [inv setArgument:&taskHint atIndex:2];
-      [inv invoke];
+
+    NSUInteger sampleCount = pcmBytesLen / sizeof(int16_t);
+    const int16_t *srcPcm = (const int16_t *)(bytes + dataOffset);
+
+    std::vector<int16_t> paddedSamples;
+    const int16_t *finalPcm = srcPcm;
+    NSUInteger finalSampleCount = sampleCount;
+
+    if (sampleCount < 16000) {
+      paddedSamples.resize(16000, 0);
+      std::copy(srcPcm, srcPcm + sampleCount, paddedSamples.begin());
+      finalPcm = paddedSamples.data();
+      finalSampleCount = 16000;
     }
-    
-    // Automatic punctuation (macOS 13+)
-    if ([request respondsToSelector:NSSelectorFromString(@"setAddsPunctuation:")]) {
-      BOOL addsPunc = YES;
-      NSInvocation *inv = [NSInvocation invocationWithMethodSignature:[request methodSignatureForSelector:NSSelectorFromString(@"setAddsPunctuation:")]];
-      [inv setSelector:NSSelectorFromString(@"setAddsPunctuation:")];
-      [inv setTarget:request];
-      [inv setArgument:&addsPunc atIndex:2];
-      [inv invoke];
-    }
-    
-    // Contextual vocabulary biasing hints
-    if ([request respondsToSelector:NSSelectorFromString(@"setContextualStrings:")]) {
-      NSArray *contextWords = @[
-        @"DuckDB", @"Polars", @"Dask", @"DataFrame", @"Parquet", @"CSV", @"DAG",
-        @"CPython", @"Python", @"RAM", @"GGUF", @"Whisper", @"VoiceNote", @"ASR", @"SLM"
-      ];
-      NSInvocation *inv = [NSInvocation invocationWithMethodSignature:[request methodSignatureForSelector:NSSelectorFromString(@"setContextualStrings:")]];
-      [inv setSelector:NSSelectorFromString(@"setContextualStrings:")];
-      [inv setTarget:request];
-      [inv setArgument:&contextWords atIndex:2];
-      [inv invoke];
-    }
-    
-    BOOL supportsOnDevice = NO;
-    if ([recognizer respondsToSelector:NSSelectorFromString(@"supportsOnDeviceRecognition")]) {
-      NSInvocation *inv = [NSInvocation invocationWithMethodSignature:[recognizer methodSignatureForSelector:NSSelectorFromString(@"supportsOnDeviceRecognition")]];
-      [inv setSelector:NSSelectorFromString(@"supportsOnDeviceRecognition")];
-      [inv setTarget:recognizer];
-      [inv invoke];
-      [inv getReturnValue:&supportsOnDevice];
-    }
-    
-    if (supportsOnDevice && [request respondsToSelector:NSSelectorFromString(@"setRequiresOnDeviceRecognition:")]) {
-      BOOL reqOnDevice = YES;
-      NSInvocation *inv = [NSInvocation invocationWithMethodSignature:[request methodSignatureForSelector:NSSelectorFromString(@"setRequiresOnDeviceRecognition:")]];
-      [inv setSelector:NSSelectorFromString(@"setRequiresOnDeviceRecognition:")];
-      [inv setTarget:request];
-      [inv setArgument:&reqOnDevice atIndex:2];
-      [inv invoke];
-    }
-    
-    // Enable partial results to continuously stream transcriptions across pauses
-    if ([request respondsToSelector:NSSelectorFromString(@"setShouldReportPartialResults:")]) {
-      BOOL partial = YES;
-      NSInvocation *inv = [NSInvocation invocationWithMethodSignature:[request methodSignatureForSelector:NSSelectorFromString(@"setShouldReportPartialResults:")]];
-      [inv setSelector:NSSelectorFromString(@"setShouldReportPartialResults:")];
-      [inv setTarget:request];
-      [inv setArgument:&partial atIndex:2];
-      [inv invoke];
-    }
-    
-    NSDate *transcribeStart = [NSDate date];
-    __block BOOL didRespond = NO;
-    __block NSString *latestTranscription = @"";
-    
-    // Safety timeout (60s)
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(60 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-      if (!didRespond) {
-        didRespond = YES;
-        if (self->_currentRecognitionTask && [self->_currentRecognitionTask respondsToSelector:NSSelectorFromString(@"cancel")]) {
-          [self->_currentRecognitionTask performSelector:NSSelectorFromString(@"cancel")];
-        }
-        self->_currentRecognitionTask = nil;
-        self->_speechRecognizer = nil;
-        [[NSFileManager defaultManager] removeItemAtPath:filePath error:nil];
-        
-        if (latestTranscription.length > 0) {
-          NSTimeInterval elapsed = [[NSDate date] timeIntervalSinceDate:transcribeStart];
-          NSLog(@"[VoiceNoteNativeAudio] ASR timeout elapsed with partial transcript in %.2fs: \"%@\"", elapsed, latestTranscription);
-          resolve(@{
-            @"text": latestTranscription,
-            @"detectedLang": (language ?: @"en"),
-            @"durationMs": @((int)(elapsed * 1000))
-          });
-        } else {
-          NSLog(@"[VoiceNoteNativeAudio] ASR transcription timed out after 60s");
-          reject(@"ASR_TIMEOUT", @"ASR transcription timed out after 60s.", nil);
-        }
-      }
-    });
-    
-    typedef void (^SFResultHandler)(id result, NSError *error);
-    SFResultHandler handler = ^(id result, NSError *error) {
-      if (didRespond) {
-        return;
-      }
-      
-      if (result && [result respondsToSelector:NSSelectorFromString(@"bestTranscription")]) {
-        id bestTranscription = [result performSelector:NSSelectorFromString(@"bestTranscription")];
-        if (bestTranscription && [bestTranscription respondsToSelector:NSSelectorFromString(@"formattedString")]) {
-          NSString *str = [bestTranscription performSelector:NSSelectorFromString(@"formattedString")];
-          if (str && str.length > 0) {
-            latestTranscription = str;
-          }
-        }
-      }
-      
-      BOOL isFinal = NO;
-      if (result && [result respondsToSelector:NSSelectorFromString(@"isFinal")]) {
-        NSInvocation *inv = [NSInvocation invocationWithMethodSignature:[result methodSignatureForSelector:NSSelectorFromString(@"isFinal")]];
-        [inv setSelector:NSSelectorFromString(@"isFinal")];
-        [inv setTarget:result];
-        [inv invoke];
-        [inv getReturnValue:&isFinal];
-      }
-      
-      if (isFinal) {
-        didRespond = YES;
-        self->_currentRecognitionTask = nil;
-        self->_speechRecognizer = nil;
-        [[NSFileManager defaultManager] removeItemAtPath:filePath error:nil];
-        
-        NSTimeInterval elapsed = [[NSDate date] timeIntervalSinceDate:transcribeStart];
-        NSLog(@"[VoiceNoteNativeAudio] ASR completed in %.2fs: \"%@\"", elapsed, latestTranscription);
-        resolve(@{
-          @"text": latestTranscription ?: @"",
-          @"detectedLang": (language ?: @"en"),
-          @"durationMs": @((int)(elapsed * 1000))
-        });
-        return;
-      }
-      
-      if (error) {
-        didRespond = YES;
-        self->_currentRecognitionTask = nil;
-        self->_speechRecognizer = nil;
-        [[NSFileManager defaultManager] removeItemAtPath:filePath error:nil];
-        
-        if (latestTranscription.length > 0) {
-          NSTimeInterval elapsed = [[NSDate date] timeIntervalSinceDate:transcribeStart];
-          NSLog(@"[VoiceNoteNativeAudio] ASR stream closed with transcribed text in %.2fs: \"%@\"", elapsed, latestTranscription);
-          resolve(@{
-            @"text": latestTranscription,
-            @"detectedLang": (language ?: @"en"),
-            @"durationMs": @((int)(elapsed * 1000))
-          });
-        } else {
-          NSLog(@"[VoiceNoteNativeAudio] ASR transcription failed: %@", error);
-          reject(@"ASR_FAILED", [NSString stringWithFormat:@"ASR transcription failed: %@", error.localizedDescription], error);
-        }
-        return;
-      }
-    };
-    
-    SEL recTaskSel = NSSelectorFromString(@"recognitionTaskWithRequest:resultHandler:");
-    NSMethodSignature *taskSig = [recognizer methodSignatureForSelector:recTaskSel];
-    if (!taskSig) {
-      self->_speechRecognizer = nil;
-      [[NSFileManager defaultManager] removeItemAtPath:filePath error:nil];
-      reject(@"ASR_UNAVAILABLE", @"Recognition task method not found.", nil);
+
+    const char *cModelPath = [effectiveModelPath UTF8String];
+    const char *cLanguage = (language && language.length > 0 && ![language isEqualToString:@"auto"]) ? [language UTF8String] : NULL;
+
+    NSLog(@"[VoiceNoteNativeAudio] Calling vn_asr_transcribe with %lu samples, model: %@, lang: %@",
+          (unsigned long)finalSampleCount, effectiveModelPath, language ?: @"auto");
+
+    struct VnAsrResponse *resp = vn_asr_transcribe(
+      finalPcm,
+      finalSampleCount,
+      cModelPath,
+      cLanguage,
+      NULL,
+      30000
+    );
+
+    if (!resp) {
+      reject(@"ASR_TIMEOUT", @"Native transcription returned null response", nil);
       return;
     }
-    
-    id (*startTask)(id, SEL, id, SFResultHandler) = (id (*)(id, SEL, id, SFResultHandler))[recognizer methodForSelector:recTaskSel];
-    id task = startTask(recognizer, recTaskSel, request, handler);
-    self->_currentRecognitionTask = task;
-    NSLog(@"[VoiceNoteNativeAudio] Recognition task started: %@", task);
+
+    int32_t status = resp->status;
+    NSString *transcriptText = resp->text ? [NSString stringWithUTF8String:resp->text] : @"";
+    NSString *detectedLang = resp->detected_lang ? [NSString stringWithUTF8String:resp->detected_lang] : (language ?: @"en");
+    uint64_t durationMs = resp->duration_ms;
+
+    vn_asr_response_free(resp);
+
+    if (status == 0) {
+      NSLog(@"[VoiceNoteNativeAudio] ASR success in %llums (lang=%@): '%@'", durationMs, detectedLang, transcriptText);
+      resolve(@{
+        @"text": transcriptText ?: @"",
+        @"detectedLang": detectedLang ?: @"en",
+        @"durationMs": @(durationMs)
+      });
+    } else if (status == -101) { // AsrEmptyOutput
+      NSLog(@"[VoiceNoteNativeAudio] ASR returned empty output (silence)");
+      reject(@"ASR_EMPTY_OUTPUT", @"ASR returned empty transcript", nil);
+    } else if (status == -102) { // AsrTimeout
+      NSLog(@"[VoiceNoteNativeAudio] ASR timed out");
+      reject(@"ASR_TIMEOUT", @"ASR transcription timed out", nil);
+    } else if (status == -103) { // AsrModelMissing
+      NSLog(@"[VoiceNoteNativeAudio] ASR model missing");
+      reject(@"ASR_MODEL_MISSING", @"Whisper model missing or invalid", nil);
+    } else {
+      NSLog(@"[VoiceNoteNativeAudio] ASR failed with status: %d", status);
+      reject(@"ASR_FAILED", [NSString stringWithFormat:@"Native ASR failed with code: %d", status], nil);
+    }
   });
 }
+
 
 RCT_EXPORT_METHOD(downloadFile:(NSString *)urlString
                   toPath:(NSString *)targetPath

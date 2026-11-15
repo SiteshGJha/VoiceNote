@@ -62,6 +62,35 @@ export const Share = {
 export const TextInput = 'TextInput';
 export const ScrollView = 'ScrollView';
 
+class AnimatedValue {
+  value: number;
+  constructor(initial: number) {
+    this.value = initial;
+  }
+  setValue(next: number) {
+    this.value = next;
+  }
+}
+
+export const Animated = {
+  Value: AnimatedValue,
+  timing: (val: any, config: any) => ({
+    start: (cb?: () => void) => {
+      if (val && typeof config?.toValue === 'number') {
+        val.setValue(config.toValue);
+      }
+      cb?.();
+    },
+  }),
+  parallel: (animations: any[]) => ({
+    start: (cb?: () => void) => {
+      animations.forEach((anim) => anim?.start?.());
+      cb?.();
+    },
+  }),
+  View: 'View',
+};
+
 export type ColorSchemeName = 'light' | 'dark' | null | undefined;
 
 export const Appearance = {
@@ -98,6 +127,7 @@ export default {
   TextInput,
   ScrollView,
   Appearance,
+  Animated,
 };
 
 

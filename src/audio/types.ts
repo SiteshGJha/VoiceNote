@@ -19,6 +19,11 @@ export interface RecordedAudio {
   channels: number;
   byteLength: number;
   hasSpeech?: boolean;
+  trailingChunk?: {
+    uri: string;
+    durationMs: number;
+    index: number;
+  } | null;
 }
 
 export interface AudioMeteringData {

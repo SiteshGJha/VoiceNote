@@ -4,6 +4,8 @@ import * as os from 'os';
 import { executePipeline } from '@/pipeline/orchestrator';
 import { RecordedAudio } from '@/audio/types';
 import { historyStorage } from '@/services/history';
+import { whisperNative } from '@/native/whisperNative';
+import Clipboard from '@react-native-clipboard/clipboard';
 
 describe('Pipeline Orchestrator & Audio File Cleanup', () => {
   it('executes full pipeline and strictly deletes temporary audio file post-ASR', async () => {
@@ -145,6 +147,69 @@ describe('Pipeline Orchestrator & Audio File Cleanup', () => {
     // Both segment temp files must be deleted
     expect(fs.existsSync(f1)).toBe(false);
     expect(fs.existsSync(f2)).toBe(false);
+  });
+
+  describe('Sequential Memory & Clipboard Auto-Copy Integration', () => {
+    beforeEach(() => {
+      (Clipboard as any).__reset();
+      jest.spyOn(whisperNative, 'unloadModel');
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('unloads Whisper model post-ASR and auto-copies final text to clipboard', async () => {
+      const tempDir = os.tmpdir();
+      const tempAudioPath = path.join(tempDir, `test_audio_clipboard_${Date.now()}.wav`);
+      fs.writeFileSync(tempAudioPath, Buffer.from('RIFF....WAVEfmt ....data....'));
+
+      const mockAudio: RecordedAudio = {
+        uri: tempAudioPath,
+        durationMs: 2500,
+        sampleRate: 16000,
+        channels: 1,
+        byteLength: 80000,
+      };
+
+      const result = await executePipeline(mockAudio, {
+        tone: 'professional',
+        lang: 'en',
+        autoCopy: true,
+      });
+
+      expect(result.status).toBe('ok');
+      if (result.status === 'ok') {
+        // Sequential memory invariant check: Whisper unload was awaited
+        expect(whisperNative.unloadModel).toHaveBeenCalled();
+
+        // Clipboard auto-copy check
+        expect(Clipboard.setString).toHaveBeenCalledWith(result.final);
+      }
+    });
+
+    it('does not auto-copy when autoCopy option is false', async () => {
+      const tempDir = os.tmpdir();
+      const tempAudioPath = path.join(tempDir, `test_audio_no_copy_${Date.now()}.wav`);
+      fs.writeFileSync(tempAudioPath, Buffer.from('RIFF....WAVEfmt ....data....'));
+
+      const mockAudio: RecordedAudio = {
+        uri: tempAudioPath,
+        durationMs: 2000,
+        sampleRate: 16000,
+        channels: 1,
+        byteLength: 64000,
+      };
+
+      const result = await executePipeline(mockAudio, {
+        tone: 'professional',
+        lang: 'en',
+        autoCopy: false,
+      });
+
+      expect(result.status).toBe('ok');
+      expect(Clipboard.setString).not.toHaveBeenCalled();
+    });
   });
 });
 

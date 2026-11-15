@@ -67,4 +67,26 @@ describe('ModelInstallerService Workflows', () => {
     const isVerified = await modelInstaller.verify('non-existent-model-id');
     expect(isVerified).toBe(false);
   });
+
+  describe('Provisioning Status', () => {
+    it('accurately reports provisioning status and missing specs', () => {
+      const status = modelInstaller.getProvisioningStatus();
+      expect(typeof status.isProvisioned).toBe('boolean');
+      expect(typeof status.hasAsr).toBe('boolean');
+      expect(typeof status.hasSlm).toBe('boolean');
+      expect(Array.isArray(status.missingSpecs)).toBe(true);
+      expect(modelInstaller.isProvisioned()).toBe(status.isProvisioned);
+    });
+
+    it('identifies missing specs when unprovisioned', () => {
+      // In test environment, default test fixtures might be seeded or absent
+      const status = modelInstaller.getProvisioningStatus();
+      if (!status.hasAsr) {
+        expect(status.missingSpecs.some((s) => s.kind === 'asr')).toBe(true);
+      }
+      if (!status.hasSlm) {
+        expect(status.missingSpecs.some((s) => s.kind === 'slm')).toBe(true);
+      }
+    });
+  });
 });

@@ -143,6 +143,37 @@ export class BackgroundAudioWorker {
       this.timer = null;
     }
   }
+
+  /**
+   * For test harnesses: simulates rolling chunk emission on a timer.
+   */
+  public simulateRollingChunks(
+    chunkCount: number,
+    intervalMs: number,
+    onChunk: (item: { uri: string; durationMs: number; index: number }) => void
+  ): () => void {
+    let index = 0;
+    const interval = setInterval(() => {
+      if (index >= chunkCount) {
+        clearInterval(interval);
+        return;
+      }
+      onChunk({
+        uri: `/mock/rolling_chunk_${index}.wav`,
+        durationMs: 20000,
+        index,
+      });
+      index++;
+    }, intervalMs);
+
+    if (interval && typeof interval.unref === 'function') {
+      interval.unref();
+    }
+
+    return () => {
+      clearInterval(interval);
+    };
+  }
 }
 
 export const audioWorker = new BackgroundAudioWorker();

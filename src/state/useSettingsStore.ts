@@ -15,6 +15,7 @@ interface SettingsStore extends UserSettings {
   setHardwareTriggerButton: (button: 'volume' | 'headphone' | 'none') => void;
   setMaxHistoryRecords: (max: number) => void;
   setHasCompletedOnboarding: (completed: boolean) => void;
+  setAutoCopyToClipboard: (enabled: boolean) => void;
   resetAllSettings: () => void;
 }
 
@@ -69,6 +70,11 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
   setHasCompletedOnboarding: (hasCompletedOnboarding: boolean) => {
     logger.info('SettingsStore', `Onboarding completed state updated to ${hasCompletedOnboarding}`);
     set({ hasCompletedOnboarding });
+  },
+
+  setAutoCopyToClipboard: (autoCopyToClipboard: boolean) => {
+    logger.info('SettingsStore', `Auto copy to clipboard updated to ${autoCopyToClipboard}`);
+    set({ autoCopyToClipboard });
   },
 
   resetAllSettings: () => {
