@@ -17,6 +17,7 @@ tract-onnx = "0.21"
 whisper-rs = "0.12"
 regex = "1"
 ring = "0.17"
+[target.'cfg(target_os = "android")'.dependencies]
 jni = { version = "0.21", default-features = false }
 
 [dev-dependencies]

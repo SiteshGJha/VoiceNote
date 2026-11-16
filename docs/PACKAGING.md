@@ -23,8 +23,15 @@ All VoiceNote production installers strictly adhere to the project's core non-ne
 ### macOS DMG Toolchain
 - **Xcode & Command Line Tools**: Xcode 15+ (`xcode-select -p`)
 - **CocoaPods**: `pod --version`
-- **Rust Dual Targets**:
+- **Rust Toolchain (Official rustup required)**:
+  Standalone Homebrew `cargo` cannot cross-compile `x86_64` on Apple Silicon. Install the official `rustup` toolchain:
   ```bash
+  # Remove Homebrew's rust if installed to avoid PATH collision
+  brew uninstall rust 2>/dev/null || true
+
+  # Install rustup and add dual macOS targets
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  source "$HOME/.cargo/env"
   rustup target add aarch64-apple-darwin x86_64-apple-darwin
   ```
 - **create-dmg** (Optional, recommended):

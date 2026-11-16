@@ -11,6 +11,9 @@ NC='\033[0m' # No Color
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Auto-source rustup environment for non-login subshells
+[ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+
 echo -e "${BLUE}=== VoiceNote macOS Standalone Universal DMG Builder ===${NC}"
 
 # 1. Pre-Flight Checks
@@ -43,13 +46,20 @@ if ! command -v pod &> /dev/null; then
   exit 1
 fi
 
-# Rust targets check
-if command -v rustup &> /dev/null; then
-  if ! rustup target list 2>/dev/null | grep -q "aarch64-apple-darwin (installed)" || ! rustup target list 2>/dev/null | grep -q "x86_64-apple-darwin (installed)"; then
-    echo -e "${RED}ERROR: Missing required Rust macOS targets for universal binary compilation.${NC}"
-    echo -e "${YELLOW}Remediation: rustup target add aarch64-apple-darwin x86_64-apple-darwin${NC}"
-    exit 1
-  fi
+# Rust toolchain and targets check
+if ! command -v rustup &> /dev/null; then
+  echo -e "${RED}ERROR: rustup is required for Universal 2 multi-target compilation.${NC}"
+  echo -e "${YELLOW}Homebrew's standalone cargo cannot compile x86_64 targets on Apple Silicon.${NC}"
+  echo -e "${YELLOW}Remediation: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh${NC}"
+  exit 1
+fi
+
+INSTALLED_TARGETS=$(rustup target list --installed 2>/dev/null || true)
+if ! echo "$INSTALLED_TARGETS" | grep -q "^aarch64-apple-darwin$" || \
+   ! echo "$INSTALLED_TARGETS" | grep -q "^x86_64-apple-darwin$"; then
+  echo -e "${RED}ERROR: Missing required Rust macOS targets for universal binary compilation.${NC}"
+  echo -e "${YELLOW}Remediation: rustup target add aarch64-apple-darwin x86_64-apple-darwin${NC}"
+  exit 1
 fi
 
 echo -e "${GREEN}Pre-flight checks passed!${NC}"
@@ -86,6 +96,18 @@ xcodebuild archive \
 mkdir -p "$REPO_ROOT/build/macos"
 rm -rf "$REPO_ROOT/build/macos/VoiceNote.app"
 cp -R "$REPO_ROOT/build/macos/voicenote.xcarchive/Products/Applications/VoiceNote.app" "$REPO_ROOT/build/macos/VoiceNote.app"
+
+# 7.1. Verify Universal Binary Architecture
+echo "Verifying application binary universal architectures..."
+APP_BIN=$(find "$REPO_ROOT/build/macos/VoiceNote.app/Contents/MacOS" -type f -perm +111 2>/dev/null | head -n 1)
+if [ -z "$APP_BIN" ] || \
+   ! lipo "$APP_BIN" -verify_arch arm64 || \
+   ! lipo "$APP_BIN" -verify_arch x86_64; then
+  echo -e "${RED}ERROR: Compiled application binary is not Universal 2 (arm64 + x86_64):${NC}"
+  lipo -info "${APP_BIN:-missing}" 2>/dev/null || true
+  exit 1
+fi
+echo -e "${GREEN}Universal 2 binary verified: $(lipo -archs "$APP_BIN")${NC}"
 
 # 8. Inside-Out Ad-Hoc Codesigning
 echo "Applying inside-out ad-hoc code signature..."

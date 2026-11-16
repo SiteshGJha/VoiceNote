@@ -1,210 +1,171 @@
-# Task Plan: Standalone Android APK & macOS DMG Production Packaging
+# Task Plan: macOS Universal Standalone Packaging Toolchain Resolution
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Create standalone release packaging pipelines and scaffolding for VoiceNote to produce an ad-hoc signed universal macOS DMG (`dist/VoiceNote-1.0.0.dmg`) and signed standalone Android APK (`dist/VoiceNote-1.0.0-arm64-v8a.apk`), enforcing an 80 MB ceiling and 100% offline-first runtime.
+**Goal:** Guarantee deterministic, reproducible Universal 2 (`arm64` + `x86_64`) macOS standalone release packaging for VoiceNote by eliminating silent single-architecture fallbacks in `scripts/build-macos.sh`, adding sub-500ms fail-fast pre-flight toolchain gates in `scripts/build-macos-dmg.sh`, implementing post-archive fat binary assertions, and updating automated sanity test suites and documentation.
 
-**Architecture:** Decoupled platform packaging pipelines (`scripts/build-macos-dmg.sh` and `scripts/build-android-release.sh`) anchored to repository root. macOS builds compile dual-architecture static Rust slices (`aarch64` + `x86_64`) merged via `lipo`, bundle offline JavaScript (`main.jsbundle`), archive via `xcodebuild`, apply inside-out ad-hoc codesign, and stage an intermediate `dmg-root` volume. Android scaffolds a full React Native 0.76 Gradle/NDK hierarchy (`AGP 8.5.2`, `Kotlin 1.9.24`, `Gradle 8.8`), cross-compiles `libvoicenote_core.so` via `cargo ndk` (API 29), provisions a gitignored release keystore, and compiles signed APKs via `./gradlew assembleRelease`.
+**Architecture:** Mandate official `rustup` with both `aarch64-apple-darwin` and `x86_64-apple-darwin` installed. In `scripts/build-macos.sh`, export `MACOSX_DEPLOYMENT_TARGET="13.0"`, compile both target slices sequentially, merge them with `lipo -create` into `macos/build/rust/libvoicenote_core.a`, and verify both architectures with `lipo "$LIB" -verify_arch arm64 x86_64`. In `scripts/build-macos-dmg.sh`, source `$HOME/.cargo/env` if present, unconditionally verify `rustup` and both targets in pre-flight (< 500 ms), and dynamically verify universal architectures on the compiled application executable (`VoiceNote.app/Contents/MacOS/*`) prior to codesigning and DMG packaging. Enforce test coverage in `tests/native/packagingSanity.test.ts`.
 
-**Tech Stack:** React Native 0.76, Rust 1.75+, Cargo NDK, Gradle 8.8, AGP 8.5.2, Kotlin 1.9.24, Xcode 15+, Apple `lipo`, `codesign`, `create-dmg` / `hdiutil`, Android SDK 34 / NDK r26b/r27, `apksigner`.
+**Tech Stack:** React Native 0.76 (macOS), Rust 1.75+, official `rustup`, Apple `lipo`, Xcode 15+, Command Line Tools, Jest (`packagingSanity.test.ts`).
 
-**Spec:** [`docs/designs/standalone_android_apk_and_macos_dmg_packaging.md`](file:///Users/siteshjha/Desktop/projects/github/VoiceNote/docs/designs/standalone_android_apk_and_macos_dmg_packaging.md)
+**Spec:** [`docs/designs/macos_universal_packaging_toolchain_resolution.md`](file:///Users/siteshjha/Desktop/projects/github/VoiceNote/docs/designs/macos_universal_packaging_toolchain_resolution.md)
 
 ---
 
 ## 1. Global Constraints
 
-- **Zero Cloud Inference**: ASR and SLM run 100% on-device; no external API endpoints are touched during runtime.
-- **Zero Telemetry**: No analytics, tracking, or phoning home SDKs.
-- **No Bundled Model Weights**: Installation binaries must remain strictly under **80 MB**; models are downloaded on demand after install.
-- **Headless & Idempotent**: Scripts run non-interactively in terminal/CI and abort immediately with exact remediation commands if any toolchain prerequisite is missing.
-- **Git Hygiene**: Generated keystores (`voicenote-release.keystore`), DMG images (`*.dmg`), archives (`*.xcarchive`), and compiled JNI libraries (`android/app/src/main/jniLibs/`) must never be committed to git.
+- **Universal 2 Binary Mandate**: Every release package (`dist/VoiceNote-1.0.0.dmg`) and native static library (`macos/build/rust/libvoicenote_core.a`) must contain both `arm64` and `x86_64` machine slices. Host-only single-architecture release builds are forbidden.
+- **Zero Silent Fallbacks**: Build scripts must never silently downgrade to host-architecture compilation when multi-target prerequisites are missing.
+- **Sub-Second Pre-Flight Interception**: Toolchain checks must fail in **< 500 ms** before tests, bundling, or Xcode archiving begin, displaying actionable copy-paste remediation commands.
+- **Zero Cloud Inference & Zero Telemetry**: Offline runtime invariants remain non-negotiable.
+- **Package Size Ceiling**: `dist/VoiceNote-1.0.0.dmg` must remain strictly **< 80 MB**.
+- **Test-Driven Verification**: Automated sanity checks in `tests/native/packagingSanity.test.ts` must be updated first (TDD RED) to assert script invariants before script modifications (TDD GREEN).
 
 ---
 
 ## 2. Review Focus
 
-1. **Pre-flight Dependency Detection**: Missing JDK 17, Android NDK, `cargo-ndk`, or Rust targets must abort immediately with exit code 1 and exact remediation commands.
-2. **DMG Volume Layout**: Passing `.app` directly as `-srcfolder` unpacks files at the root of the volume; script must stage into `build/macos/dmg-root/` so `VoiceNote.app` appears alongside `/Applications`.
-3. **macOS Inside-Out Codesign**: Nested frameworks and dylibs in `Contents/Frameworks/` must be signed before the top-level bundle to avoid `--deep` invalidation.
-4. **Binary Size Ceiling**: Any package exceeding 80 MB must fail packaging with an explicit error identifying probable model weight bundling.
-5. **Executable Permissions**: All `.sh` scripts and `gradlew` must have executable permissions (`chmod +x`).
+1. **Rustup Environment Auto-Detection**: Ensure `[ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"` is sourced so non-login subshells recognize `rustup` without false-positive failures.
+2. **Robust Target Verification**: Use `rustup target list --installed` or exact regex matching rather than fragile grep for `(installed)` (which misses `(default)`).
+3. **C/C++ Deployment Target Synchronization**: Ensure `MACOSX_DEPLOYMENT_TARGET="13.0"` is explicitly exported before cargo compilation to synchronize Clang sysroot defaults with VoiceNote's minimum supported OS.
+4. **Dynamic Executable Discovery**: Handle case-sensitivity cleanly by dynamically finding the primary executable inside `build/macos/VoiceNote.app/Contents/MacOS/` instead of hardcoding casing.
+5. **Architectural Verification Rigor**: Use native Apple `lipo "$BIN" -verify_arch arm64 x86_64` for path-independent verification.
 
 ---
 
 ## 3. Required API Contracts & Interface Definitions
 
-### A. Rust JNI Bridge (`rust/voicenote-core/src/android_jni.rs`)
-```rust
-#[no_mangle]
-pub unsafe extern "system" fn Java_com_voicenote_core_VoiceNoteCoreJni_trimSilenceWav(
-    mut env: JNIEnv,
-    _class: JClass,
-    input_path: JString,
-    output_path: JString,
-) -> jboolean;
+### A. Pre-Flight Toolchain Gate Specification (`scripts/build-macos-dmg.sh` & `scripts/build-macos.sh`)
+```bash
+# Sourcing environment
+[ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
 
-#[no_mangle]
-pub unsafe extern "system" fn Java_com_voicenote_core_VoiceNoteCoreJni_verifyFileChecksum(
-    mut env: JNIEnv,
-    _class: JClass,
-    file_path: JString,
-    expected_sha256: JString,
-) -> jboolean;
+# 1. Rustup presence check
+if ! command -v rustup &> /dev/null; then
+  echo -e "${RED}ERROR: rustup is required for Universal 2 multi-target compilation.${NC}"
+  echo -e "${YELLOW}Remediation: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh${NC}"
+  exit 1
+fi
 
-#[no_mangle]
-pub unsafe extern "system" fn Java_com_voicenote_core_VoiceNoteCoreJni_transcribeAudio(
-    mut env: JNIEnv,
-    _class: JClass,
-    file_path: JString,
-    language: JString,
-    model_path: JString,
-) -> jobject;
-
-#[no_mangle]
-pub unsafe extern "system" fn Java_com_voicenote_core_VoiceNoteCoreJni_getCoreVersion(
-    env: JNIEnv,
-    _class: JClass,
-) -> jstring;
+# 2. Dual target check
+INSTALLED_TARGETS=$(rustup target list --installed 2>/dev/null || true)
+if ! echo "$INSTALLED_TARGETS" | grep -q "^aarch64-apple-darwin$" || \
+   ! echo "$INSTALLED_TARGETS" | grep -q "^x86_64-apple-darwin$"; then
+  echo -e "${RED}ERROR: Missing required Rust macOS targets for universal binary compilation.${NC}"
+  echo -e "${YELLOW}Remediation: rustup target add aarch64-apple-darwin x86_64-apple-darwin${NC}"
+  exit 1
+fi
 ```
 
-### B. Kotlin JNI Interface (`android/app/src/main/java/com/voicenote/core/VoiceNoteCoreJni.kt`)
-```kotlin
-package com.voicenote.core
+### B. Dual Target Compilation & Universal Assembly Contract (`scripts/build-macos.sh`)
+```bash
+export MACOSX_DEPLOYMENT_TARGET="13.0"
 
-data class VoiceNoteAsrResult(
-    val text: String,
-    val language: String,
-    val durationMs: Long
-)
+cargo build --release --package voicenote-core --target aarch64-apple-darwin --manifest-path "$REPO_ROOT/rust/Cargo.toml"
+cargo build --release --package voicenote-core --target x86_64-apple-darwin --manifest-path "$REPO_ROOT/rust/Cargo.toml"
 
-object VoiceNoteCoreJni {
-    init {
-        System.loadLibrary("voicenote_core")
-    }
+mkdir -p "$REPO_ROOT/macos/build/rust"
+lipo -create \
+  "$REPO_ROOT/rust/target/aarch64-apple-darwin/release/libvoicenote_core.a" \
+  "$REPO_ROOT/rust/target/x86_64-apple-darwin/release/libvoicenote_core.a" \
+  -output "$REPO_ROOT/macos/build/rust/libvoicenote_core.a"
 
-    @JvmStatic external fun trimSilenceWav(inputPath: String, outputPath: String): Boolean
-    @JvmStatic external fun verifyFileChecksum(filePath: String, expectedSha256: String): Boolean
-    @JvmStatic external fun transcribeAudio(filePath: String, language: String, modelPath: String): VoiceNoteAsrResult
-    @JvmStatic external fun getCoreVersion(): String
-}
+cp "$REPO_ROOT/rust/voicenote-core/voicenote_core.h" "$REPO_ROOT/macos/build/rust/"
+
+# Verify fat binary
+if ! lipo "$REPO_ROOT/macos/build/rust/libvoicenote_core.a" -verify_arch arm64 x86_64; then
+  echo "ERROR: libvoicenote_core.a does not contain both arm64 and x86_64 slices." >&2
+  exit 1
+fi
 ```
 
-### C. Android Native Audio Module (`VoiceNoteNativeAudioModule.kt`)
-```kotlin
-package com.voicenote.nativeaudio
-
-import com.facebook.react.bridge.*
-
-class VoiceNoteNativeAudioModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
-    override fun getName(): String = "VoiceNoteNativeAudio"
-
-    @ReactMethod fun startRecording(promise: Promise)
-    @ReactMethod fun stopRecording(promise: Promise)
-    @ReactMethod fun startRollingRecording(options: ReadableMap?, promise: Promise)
-    @ReactMethod fun stopRollingRecording(promise: Promise)
-    @ReactMethod fun cancelRollingRecording(promise: Promise)
-    @ReactMethod fun downloadFile(url: String, targetPath: String, promise: Promise)
-    @ReactMethod fun verifyFileChecksum(filePath: String, expectedSha256: String, promise: Promise)
-    @ReactMethod fun moveFile(sourcePath: String, targetPath: String, promise: Promise)
-    @ReactMethod fun transcribeAudio(filePath: String, language: String?, modelPath: String?, promise: Promise)
-    @ReactMethod fun isRollingRecordingActive(promise: Promise)
-}
+### C. Post-Archive Binary Verification Contract (`scripts/build-macos-dmg.sh`)
+```bash
+echo "Verifying application binary universal architectures..."
+APP_BIN=$(find "$REPO_ROOT/build/macos/VoiceNote.app/Contents/MacOS" -type f -perm +111 2>/dev/null | head -n 1)
+if [ -z "$APP_BIN" ] || ! lipo "$APP_BIN" -verify_arch arm64 x86_64; then
+  echo -e "${RED}ERROR: Compiled application binary is not Universal 2 (arm64 + x86_64):${NC}"
+  lipo -info "${APP_BIN:-missing}" || true
+  exit 1
+fi
+echo -e "${GREEN}Universal 2 binary verified: $(lipo -archs "$APP_BIN")${NC}"
 ```
 
 ---
 
-## 4. Step-by-Step Implementation Checklist
+## 4. Step-by-Step Implementation Tasks
 
-### Task 1: Rust Android JNI & macOS Universal Build
+### Task 1: Update Automated Packaging Sanity Suite (TDD RED)
 **Files:**
-- Modify: `rust/voicenote-core/Cargo.toml`
-- Modify: `rust/voicenote-core/src/lib.rs`
-- Create: `rust/voicenote-core/src/android_jni.rs`
+- Modify: `tests/native/packagingSanity.test.ts`
+
+- [x] **Step 1.1**: Add assertions in `tests/native/packagingSanity.test.ts` requiring:
+  - `scripts/build-macos.sh` contains `MACOSX_DEPLOYMENT_TARGET` export.
+  - `scripts/build-macos.sh` contains dual target builds (`--target aarch64-apple-darwin` and `--target x86_64-apple-darwin`).
+  - `scripts/build-macos.sh` contains `lipo -create` and `verify_arch arm64 x86_64` assertion.
+  - `scripts/build-macos.sh` contains zero single-target host fallback (`ARCH=$(uname -m)`).
+  - `scripts/build-macos-dmg.sh` contains pre-flight `rustup` and dual target check.
+  - `scripts/build-macos-dmg.sh` contains post-archive universal binary assertion (`verify_arch arm64 x86_64`).
+- [x] **Step 1.2**: Run `npm test tests/native/packagingSanity.test.ts` to confirm new assertions fail on existing scripts (RED phase).
+
+---
+
+### Task 2: Host Developer Workstation Toolchain Setup
+**Scope:** One-time developer workstation toolchain provisioning.
+
+- [x] **Step 2.1**: Check active rustup installation and remove conflicting Homebrew rust if present (`brew uninstall rust 2>/dev/null || true`).
+- [x] **Step 2.2**: Install official `rustup` via `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y`.
+- [x] **Step 2.3**: Source `$HOME/.cargo/env` and add targets: `rustup target add aarch64-apple-darwin x86_64-apple-darwin`.
+- [x] **Step 2.4**: Verify with `rustup target list --installed` that both `aarch64-apple-darwin` and `x86_64-apple-darwin` are present.
+
+---
+
+### Task 3: Hardening `scripts/build-macos.sh` (TDD GREEN Part 1)
+**Files:**
 - Modify: `scripts/build-macos.sh`
-- Modify: `scripts/build-android.sh`
 
-- [x] **Step 1.1**: Update `rust/voicenote-core/Cargo.toml` to version `1.0.0` and add `jni = { version = "0.21", default-features = false }`.
-- [x] **Step 1.2**: In `rust/voicenote-core/src/lib.rs`, add `#[cfg(target_os = "android")] pub mod android_jni;` and update `voicenote_core_version` to return `"1.0.0"`.
-- [x] **Step 1.3**: Create `rust/voicenote-core/src/android_jni.rs` implementing `Java_com_voicenote_core_VoiceNoteCoreJni_*` bindings calling `vn_audio_trim_and_save_wav`, `crypto::verify_file_sha256`, and `vn_asr_transcribe`.
-- [x] **Step 1.4**: Modify `scripts/build-macos.sh` to anchor with `REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"`, compile `aarch64-apple-darwin` and `x86_64-apple-darwin` slices, and merge via `lipo -create` into `macos/build/rust/libvoicenote_core.a`.
-- [x] **Step 1.5**: Modify `scripts/build-android.sh` to anchor with `REPO_ROOT` and cross-compile `libvoicenote_core.so` via `cargo ndk` to `android/app/src/main/jniLibs/arm64-v8a/`.
-- [x] **Step 1.6**: Run `cargo check --manifest-path rust/Cargo.toml` to verify Rust code compiles without errors.
-
----
-
-### Task 2: Android Project Scaffolding
-**Files:**
-- Create: `android/build.gradle`
-- Create: `android/settings.gradle`
-- Create: `android/gradle.properties`
-- Create: `android/gradlew` & `android/gradle/wrapper/gradle-wrapper.properties`
-- Create: `android/app/build.gradle`
-- Create: `android/app/src/main/res/values/styles.xml`
-- Create: `android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml`
-- Create: `android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml`
-- Create: `android/app/proguard-rules.pro`
-
-- [x] **Step 2.1**: Create `android/build.gradle` configuring AGP 8.5.2, Kotlin 1.9.24, and repositories (google(), mavenCentral(), and node_modules/react-native/android).
-- [x] **Step 2.2**: Create `android/settings.gradle` with rootProject.name = 'voicenote', include ':app', and apply native_modules.gradle autolinking.
-- [x] **Step 2.3**: Create `android/gradle.properties` setting `-Xmx2048m`, `android.useAndroidX=true`, `android.enableJetifier=true`, and `hermesEnabled=true`.
-- [x] **Step 2.4**: Create `android/gradlew` (executable shell script with curl fallback for wrapper jar) and `android/gradle/wrapper/gradle-wrapper.properties` targeting Gradle 8.8 (`gradle-8.8-bin.zip`). Ensure `chmod +x android/gradlew`.
-- [x] **Step 2.5**: Create `android/app/build.gradle` applying `com.android.application`, `org.jetbrains.kotlin.android`, and `com.facebook.react`, with `applicationId "com.voicenote"`, `minSdkVersion 29`, `targetSdkVersion 34`, `compileSdkVersion 34`, `ndk.abiFilters "arm64-v8a"`, signing configs referencing `voicenote-release.keystore`, and ProGuard configuration.
-- [x] **Step 2.6**: Create `android/app/src/main/res/values/styles.xml` defining `AppTheme` extending `Theme.AppCompat.DayNight.NoActionBar`.
-- [x] **Step 2.7**: Create `android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml` and `ic_launcher_round.xml` adaptive launcher icon XML resources.
-- [x] **Step 2.8**: Create `android/app/proguard-rules.pro` keeping `com.voicenote.core.**`, native methods, Nitro, and MMKV symbols.
+- [x] **Step 3.1**: Source `[ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"` at top of script.
+- [x] **Step 3.2**: Remove lines 10–28 (the single-architecture fallback branch).
+- [x] **Step 3.3**: Add mandatory `rustup` and dual targets check with remediation instructions.
+- [x] **Step 3.4**: Export `MACOSX_DEPLOYMENT_TARGET="13.0"`.
+- [x] **Step 3.5**: Unconditionally compile `aarch64-apple-darwin` and `x86_64-apple-darwin` targets.
+- [x] **Step 3.6**: Ensure `mkdir -p "$REPO_ROOT/macos/build/rust"` and execute `lipo -create` merging both slices into `macos/build/rust/libvoicenote_core.a`.
+- [x] **Step 3.7**: Copy `rust/voicenote-core/voicenote_core.h` to `macos/build/rust/`.
+- [x] **Step 3.8**: Add defensive assertion: `lipo "$REPO_ROOT/macos/build/rust/libvoicenote_core.a" -verify_arch arm64 x86_64`.
+- [x] **Step 3.9**: Execute `scripts/build-macos.sh` and verify with `lipo -info macos/build/rust/libvoicenote_core.a`.
 
 ---
 
-### Task 3: Android Native Modules & Kotlin Entry Points
+### Task 4: Hardening `scripts/build-macos-dmg.sh` (TDD GREEN Part 2)
 **Files:**
-- Create: `android/app/src/main/java/com/voicenote/MainActivity.kt`
-- Create: `android/app/src/main/java/com/voicenote/MainApplication.kt`
-- Create: `android/app/src/main/java/com/voicenote/core/VoiceNoteCoreJni.kt`
-- Create: `android/app/src/main/java/com/voicenote/nativeaudio/VoiceNoteNativeAudioModule.kt`
-- Create: `android/app/src/main/java/com/voicenote/nativeaudio/VoiceNoteNativePackage.kt`
+- Modify: `scripts/build-macos-dmg.sh`
 
-- [x] **Step 3.1**: Create `android/app/src/main/java/com/voicenote/MainActivity.kt` extending `ReactActivity` returning `"voicenote"` as main component name.
-- [x] **Step 3.2**: Create `android/app/src/main/java/com/voicenote/MainApplication.kt` extending `Application` and `ReactApplication`, configuring `ReactNativeHost` with autolinked packages plus `VoiceNoteNativePackage()`.
-- [x] **Step 3.3**: Create `android/app/src/main/java/com/voicenote/core/VoiceNoteCoreJni.kt` declaring external JNI bindings and `VoiceNoteAsrResult` data class.
-- [x] **Step 3.4**: Create `android/app/src/main/java/com/voicenote/nativeaudio/VoiceNoteNativeAudioModule.kt` implementing the complete `nativeAudio.ts` contract for Android (`AudioRecord` 16kHz PCM, rolling chunk management, file download/verification/move, `transcribeAudio`, and RCTDeviceEventEmitter events).
-- [x] **Step 3.5**: Create `android/app/src/main/java/com/voicenote/nativeaudio/VoiceNoteNativePackage.kt` registering `VoiceNoteNativeAudioModule`.
+- [x] **Step 4.1**: Source `[ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"` in pre-flight diagnostics.
+- [x] **Step 4.2**: Replace optional `if command -v rustup` (lines 46–53) with mandatory fail-fast check for `rustup` and dual targets using `rustup target list --installed`.
+- [x] **Step 4.3**: Add Step 7.1 after `.app` extraction: dynamically find application executable (`find ... -type f -perm +111`) and assert `lipo "$APP_BIN" -verify_arch arm64 x86_64`.
+- [x] **Step 4.4**: Re-run `npm test tests/native/packagingSanity.test.ts` to confirm all script sanity assertions pass (GREEN phase).
 
 ---
 
-### Task 4: Packaging Automation & Signing Scripts
+### Task 5: Update Packaging Documentation (`docs/PACKAGING.md`)
 **Files:**
-- Create: `scripts/generate-android-keystore.sh`
-- Create: `scripts/build-android-release.sh`
-- Create: `scripts/build-macos-dmg.sh`
-- Modify: `.gitignore`
+- Modify: `docs/PACKAGING.md`
 
-- [x] **Step 4.1**: Create `scripts/generate-android-keystore.sh` with `chmod +x` to generate `android/app/voicenote-release.keystore` via `keytool` with default dev credentials or environment overrides.
-- [x] **Step 4.2**: Create `scripts/build-android-release.sh` with `chmod +x` containing pre-flight checks (Node >= 18, JDK 17, Android SDK 34, Android NDK r26b/r27, `cargo-ndk`, `aarch64-linux-android`), keystore provisioning, `cargo ndk` build, `./gradlew assembleRelease`, dynamic `apksigner` validation, and 80 MB ceiling assertion.
-- [x] **Step 4.3**: Create `scripts/build-macos-dmg.sh` with `chmod +x` containing pre-flight checks (Node >= 18, Xcode 15+, CocoaPods, Rust macOS targets, `create-dmg`/`hdiutil`), universal Rust `lipo` build, `npm run bundle:macos`, `xcodebuild archive`, `.app` extraction, inside-out ad-hoc codesigning, `dmg-root` staging, DMG generation, and 80 MB ceiling assertion.
-- [x] **Step 4.4**: Update `.gitignore` to ignore `*.dmg`, `*.xcarchive`, `android/app/src/main/jniLibs/`, `macos/build/`, and `android/app/voicenote-release.keystore`.
+- [x] **Step 5.1**: Apply the exact diff to Section 2 of `docs/PACKAGING.md` specifying official `rustup` toolchain, target setup, and Homebrew collision warnings.
+- [x] **Step 5.2**: Verify markdown structure and links in `docs/PACKAGING.md`.
 
 ---
 
-### Task 5: Project Scripts & Community CLI Platform Android Dependency
-**Files:**
-- Modify: `package.json`
-- Create: `docs/PACKAGING.md`
+### Task 6: Full Verification Loop & Release Packaging
+**Scope:** End-to-end pipeline validation.
 
-- [x] **Step 5.1**: Update `package.json` adding `"@react-native-community/cli-platform-android": "^20.2.0"` to `devDependencies` and adding scripts: `build:macos:dmg`, `build:android:release`, `build:all`, and `generate:android:keystore`.
-- [x] **Step 5.2**: Create `docs/PACKAGING.md` documenting prerequisites, build commands, signing configuration, verification steps, Gatekeeper bypass (`xattr -cr`), and Android sideloading instructions.
-
----
-
-### Task 6: Automated Packaging Sanity Test Suite & Full Verification Loop
-**Files:**
-- Create: `tests/native/packagingSanity.test.ts`
-
-- [x] **Step 6.1**: Create `tests/native/packagingSanity.test.ts` verifying that:
-  - Packaging scripts (`scripts/build-macos-dmg.sh`, `scripts/build-android-release.sh`, `scripts/generate-android-keystore.sh`) exist and have executable bit set (`0o111`).
-  - Both release build scripts contain the 80 MB size assertion logic.
-  - `.gitignore` ignores `*.dmg`, `*.xcarchive`, `android/app/src/main/jniLibs/`, and `*.keystore`.
-  - Android scaffolding files (`build.gradle`, `settings.gradle`, `gradle.properties`, `gradlew`, `styles.xml`, `proguard-rules.pro`) exist.
-- [x] **Step 6.2**: Run `npm test tests/native/packagingSanity.test.ts` to confirm tests pass.
-- [x] **Step 6.3**: Run `npm run audit:privacy` to verify 0 privacy / telemetry violations.
-- [x] **Step 6.4**: Run `npm run typecheck` and full `npm test` to verify 0 regressions across all existing test suites.
+- [x] **Step 6.1**: Run `npm run audit:privacy` to verify zero network/telemetry violations.
+- [x] **Step 6.2**: Run `npm test` to verify 0 regressions across all unit and sanity tests.
+- [x] **Step 6.3**: Run `npm run typecheck` to confirm strict TypeScript integrity.
+- [x] **Step 6.4**: Execute `./scripts/build-macos-dmg.sh` end-to-end to build the standalone release DMG.
+- [x] **Step 6.5**: Verify that:
+  - Xcode links `x86_64` and `arm64` without symbol errors.
+  - Post-archive binary assertion reports `arm64 x86_64`.
+  - Codesign verification passes (`codesign --verify --deep --strict`).
+  - Output DMG exists at `dist/VoiceNote-1.0.0.dmg`.
+  - Output DMG file size is `< 80 MB`.

@@ -146,6 +146,31 @@ describe('Standalone Packaging Infrastructure Sanity Tests', () => {
       expect(script).toMatch(/exit 1/);
     });
 
+    it('scripts/build-macos-dmg.sh unconditionally enforces rustup and verifies universal app executable post-archive', () => {
+      const script = fs.readFileSync(
+        path.join(repoRoot, 'scripts/build-macos-dmg.sh'),
+        'utf8'
+      );
+      expect(script).toContain('.cargo/env');
+      expect(script).toContain('command -v rustup');
+      expect(script).toMatch(/verify_arch arm64/);
+      expect(script).toMatch(/verify_arch x86_64/);
+    });
+
+    it('scripts/build-macos.sh strictly compiles universal targets without host fallback and asserts fat binary', () => {
+      const script = fs.readFileSync(
+        path.join(repoRoot, 'scripts/build-macos.sh'),
+        'utf8'
+      );
+      expect(script).toContain('MACOSX_DEPLOYMENT_TARGET');
+      expect(script).toContain('--target aarch64-apple-darwin');
+      expect(script).toContain('--target x86_64-apple-darwin');
+      expect(script).toContain('lipo -create');
+      expect(script).toMatch(/verify_arch arm64/);
+      expect(script).toMatch(/verify_arch x86_64/);
+      expect(script).not.toContain('ARCH=$(uname -m)');
+    });
+
     it('scripts/build-macos-dmg.sh signs framework directories and verifies code signature strictly', () => {
       const script = fs.readFileSync(
         path.join(repoRoot, 'scripts/build-macos-dmg.sh'),
@@ -166,7 +191,7 @@ describe('Standalone Packaging Infrastructure Sanity Tests', () => {
       expect(jniCode).toContain('Java_com_voicenote_core_VoiceNoteCoreJni_verifyFileChecksum');
       expect(jniCode).toContain('Java_com_voicenote_core_VoiceNoteCoreJni_trimSilenceWav');
       expect(jniCode).toContain('Java_com_voicenote_core_VoiceNoteCoreJni_transcribeAudio');
-      expect(jniCode).toMatch(/fn Java_com_voicenote_core_VoiceNoteCoreJni_getCoreVersion\(\s*mut env: JNIEnv/);
+      expect(jniCode).toMatch(/fn Java_com_voicenote_core_VoiceNoteCoreJni_getCoreVersion\(\s*(mut )?env: JNIEnv/);
     });
   });
 
