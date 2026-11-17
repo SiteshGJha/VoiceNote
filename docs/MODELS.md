@@ -41,3 +41,12 @@ In accordance with PRD non-negotiable constraints, **no speech recognition (Whis
 - **Standalone Package Ceiling**: Release installers (`dist/VoiceNote-1.0.0.dmg` and `dist/VoiceNote-1.0.0-arm64-v8a.apk`) must remain strictly under **80 MB** (actual release packages are ~25–45 MB).
 - **Automated Build Gate**: If weights are inadvertently copied into assets, `scripts/build-macos-dmg.sh`, `scripts/build-android-release.sh`, and `scripts/build-all.sh` detect the size violation and fail the build immediately.
 - **Post-Install Provisioning**: All model weights are provisioned post-installation through user action (via `FirstRunSetupModal.tsx` or `ModelsScreen.tsx`), downloaded over resumable HTTPS with storage headroom verification, and checked against catalog SHA-256 digests.
+
+---
+
+## 7. Persistent On-Disk Model Manifest & Cold-Start Reconciliation
+
+- **Physical Manifest Storage**: Model installations are recorded in `~/.voicenote/models/installed_models.json` on macOS desktop (written via native atomic file primitives in `AppDelegate.mm`).
+- **Two-Tier Cold-Start Reconciliation**:
+  1. *Tier 1 Fast Path (< 10 ms)*: Verifies existing manifest records against physical file presence and exact byte size matching, restoring model registrations instantly without re-hashing.
+  2. *Tier 2 Deep Reconciliation*: If the manifest is deleted or corrupted, scans `asr/` and `slm/` subdirectories, matches candidate files against catalog specifications, verifies cryptographic SHA-256 integrity, reconstructs the manifest, and registers engines without prompting the user to re-download.

@@ -418,6 +418,19 @@ Home → Settings → Privacy
   4. Runs completely independent of a development machine or Metro server.
 - **Postconditions:** Mobile app runs 100% offline; APK size remains strictly under 80 MB.
 
+### UC-35 — Cold-Start Model Manifest Verification & Disk Reconciliation
+
+- **Actors:** System
+- **Trigger:** App startup (`App.tsx` and `HomeScreen.tsx`).
+- **Flow:**
+  1. `modelInstaller.initialize()` executes on startup, protected by a single-flight concurrency mutex.
+  2. Resolves models directory (`~/.voicenote/models`) via native bridge (`getModelsDirectory`).
+  3. **Tier 1 Fast Path (< 10 ms)**: Reads `~/.voicenote/models/installed_models.json` via native file primitives (`readTextFile`), verifying that each installed model exists on disk (`fileExists`) and matches recorded `sizeBytes` (`getFileSize`). If valid, models are immediately registered in `asrModelRegistry` and `slmModelRegistry`.
+  4. **Tier 2 Deep Reconciliation**: If the manifest is missing or damaged, scans physical `asr/` and `slm/` subdirectories (`listDirectory`), matches candidate filenames against `MODEL_CATALOG`, validates cryptographic SHA-256 integrity, reconstructs the manifest, persists it to disk (`writeTextFile`), and registers engines.
+  5. UI record button is gated (`disabled={isInitializingModels}`) until initialization completes.
+  6. Subsequent recording starts immediately without triggering `FirstRunSetupModal`.
+- **Postconditions:** Pre-downloaded models persist across app restarts without network requests or repeated downloads.
+
 ---
 
 ## 4. Non-Functional Requirements & Acceptance Criteria

@@ -67,3 +67,13 @@
 - [x] Automated development release keystore generator (`scripts/generate-android-keystore.sh`) supporting external CI environment secrets
 - [x] Standalone signed release APK assembly via Gradle (`./gradlew assembleRelease`) with cryptographic `apksigner` validation
 - [x] Multi-platform packaging orchestrator (`scripts/build-all.sh`) with strict `< 80 MB` installer size ceiling enforcement
+
+## Phase 10: Persistent On-Disk Model Management & Cold-Start Reconciliation
+- [x] Native macOS disk I/O primitives (`getModelsDirectory`, `readTextFile`, `writeTextFile`, `fileExists`, `getFileSize`, `listDirectory`) in `AppDelegate.mm` on background GCD queue
+- [x] TypeScript bridge methods and Jest/Node mock fallbacks in `src/native/nativeAudio.ts`
+- [x] Two-tier reconciliation engine in `ModelInstallerService` (`src/services/modelManager/installer.ts`):
+  - [x] Tier 1 Fast Path (< 10ms manifest hit validating file size against `installed_models.json`)
+  - [x] Tier 2 Deep Reconciliation (manifest miss / corruption recovery by scanning `asr/` and `slm/` with SHA-256 validation)
+- [x] Single-flight mutex guarding concurrent startup calls to `modelInstaller.initialize()`
+- [x] UI startup synchronization in `App.tsx` and record button gating in `HomeScreen.tsx`
+- [x] Automated test suite verifying cold-start persistence, reconciliation, and concurrency (`tests/modelInstaller.reconciliation.test.ts`)

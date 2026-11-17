@@ -19,6 +19,7 @@ VoiceNote is a fully offline, privacy-first mobile and desktop application that 
 8. **Cryptographic Model Verification**: Streaming SHA-256 verifier (`ring = "0.17"`) for zero-copy model weight integrity checks.
 9. **UI Presentation & Fast Dictation**: Clean, responsive transcription display with one-tap copy, editable text, instant re-rewriting, encrypted history, live countdown timer (`MM:SS / 05:00`), 4:30 amber warning, and seamless in-place dictation with automatic clipboard copy and unobtrusive toast feedback.
 10. **First-Run Provisioning Flow**: In-app setup modal that performs disk quota checks (>20% headroom) and sequentially downloads and verifies baseline ASR and SLM models before recording is permitted.
+11. **Persistent On-Disk Manifest & Two-Tier Cold-Start Reconciliation**: Physical model manifest persistence at `~/.voicenote/models/installed_models.json` via native Objective-C++ file primitives, with Tier 1 Fast Path (< 10 ms startup size verification) and Tier 2 Deep Reconciliation (automatic scanning of `asr/` and `slm/` with SHA-256 validation) eliminating repeated download prompts on app restart.
 
 ## Non-Negotiable Constraints
 - **Zero Cloud Inference**: 100% offline inference. No audio, transcript, or rewritten text leaves the physical device.

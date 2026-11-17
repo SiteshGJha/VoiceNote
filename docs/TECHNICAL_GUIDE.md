@@ -115,7 +115,7 @@ guaranteeing memory safety, off-main-thread execution, and hardware-accelerated 
 - **Downloader** (`downloader.ts`): resumable HTTPS downloads with progress callbacks (drives the ProgressBar).
 - **Streaming SHA-256 Verifier** (`verifier.ts`, Rust `src/crypto/sha256.rs` via `ring = "0.17"`): streams chunks directly from disk to compute SHA-256 without memory spikes, verifying integrity against expected catalog digests.
 - **Quota/eviction** (`storageQuota.ts`): refuses installs when free disk is insufficient (with headroom); the Models screen shows a usage banner.
-- **Installer** (`installer.ts`): persists an installed-manifest, registers models into the ASR/SLM registries, and cleans up on delete.
+- **Installer & Two-Tier Reconciliation** (`installer.ts`, `AppDelegate.mm`, `nativeAudio.ts`): maintains a physical on-disk manifest at `~/.voicenote/models/installed_models.json` via native atomic file primitives. On cold start, **Tier 1 Fast Path (< 10 ms)** validates file presence and byte size against the manifest; if the manifest is missing or damaged, **Tier 2 Deep Reconciliation** scans `asr/` and `slm/` subdirectories, matches candidate files against catalog specifications, verifies cryptographic SHA-256 hashes, reconstructs the manifest, and registers engines without prompting the user to re-download. Model uninstallation safely unregisters engines and purges physical files.
 
 ### 3.8 UI & State
 - **Zustand stores**: `useAppStore` (pipeline stage, tone/language, last result, metrics, errors), `useSettingsStore` (tone, lang, VAD sensitivity, ASR tier, Hindi output format, theme, haptics).
@@ -169,6 +169,7 @@ The exact patterns interviewers look for in a voice-memo/audio ML product, and w
 | 21 | **Continuous live rolling capture** | Silence-bounded 20–25s chunks, FIFO background transcription, seam prompt injection, 5-minute safety ceiling | `src/audio/rollingRecorder.ts`, `src/ml/asr/rollingAsrWorker.ts` |
 | 22 | **Semantic paragraph SLM rewriting** | Long transcripts split into 150–200 word blocks rewritten sequentially with entity guards & RAM deallocation | `src/ml/slm/paragraphRewriter.ts` |
 | 23 | **Standalone production packaging (< 80 MB ceiling)** | Universal DMG (fat `lipo` binary + ad-hoc sign) & standalone Android APK (Gradle + `cargo-ndk` JNI) without Metro | `scripts/build-macos-dmg.sh`, `build-android-release.sh`, `PACKAGING.md` |
+| 24 | **Persistent on-disk manifest & cold-start reconciliation** | Physical manifest (`~/.voicenote/models/installed_models.json`) with sub-10ms size validation and deep SHA-256 disk scanning eliminates repeated 639 MB download prompts on app restart | `AppDelegate.mm`, `nativeAudio.ts`, `installer.ts`, `HomeScreen.tsx` |
 
 ---
 
@@ -245,4 +246,4 @@ Streaming/partial results during recording, punctuation restoration, speaker dia
 - Rewriting validation ratio: **[0.35×, 2.5×]** length bound with exact entity preservation.
 - History cap: **50 records**, FIFO eviction.
 - SLM generation: **temperature 0.3**, top-P 0.9, max 512 tokens.
-- Test coverage: **68 Rust tests** across 10 test suites; **280 Jest tests** across 50 test suites; 100% offline.
+- Test coverage: **68 Rust tests** across 10 test suites; **288 Jest tests** across 51 test suites; 100% offline.
