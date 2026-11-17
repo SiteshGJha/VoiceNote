@@ -729,6 +729,116 @@ RCT_EXPORT_METHOD(moveFile:(NSString *)sourcePath
   resolve(@(YES));
 }
 
+RCT_EXPORT_METHOD(getModelsDirectory:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    NSString *modelsDir = [NSHomeDirectory() stringByAppendingPathComponent:@".voicenote/models"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:modelsDir withIntermediateDirectories:YES attributes:nil error:nil];
+    resolve(modelsDir);
+  });
+}
+
+RCT_EXPORT_METHOD(readTextFile:(NSString *)filePath
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
+  if (!filePath || filePath.length == 0) {
+    resolve([NSNull null]);
+    return;
+  }
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    if (![[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
+      resolve([NSNull null]);
+      return;
+    }
+    NSError *error = nil;
+    NSString *content = [NSString stringWithContentsOfFile:filePath encoding:NSUTF8StringEncoding error:&error];
+    if (error) {
+      reject(@"FS_READ_ERROR", error.localizedDescription, error);
+      return;
+    }
+    resolve(content ?: [NSNull null]);
+  });
+}
+
+RCT_EXPORT_METHOD(writeTextFile:(NSString *)filePath
+                  content:(NSString *)content
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
+  if (!filePath || filePath.length == 0 || !content) {
+    reject(@"FS_INVALID_PATH", @"File path or content is empty", nil);
+    return;
+  }
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    NSString *parentDir = [filePath stringByDeletingLastPathComponent];
+    [[NSFileManager defaultManager] createDirectoryAtPath:parentDir withIntermediateDirectories:YES attributes:nil error:nil];
+    NSError *error = nil;
+    BOOL success = [content writeToFile:filePath atomically:YES encoding:NSUTF8StringEncoding error:&error];
+    if (!success || error) {
+      reject(@"FS_WRITE_ERROR", error ? error.localizedDescription : @"Failed to write text file", error);
+      return;
+    }
+    resolve(@(YES));
+  });
+}
+
+RCT_EXPORT_METHOD(fileExists:(NSString *)filePath
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
+  if (!filePath || filePath.length == 0) {
+    resolve(@(NO));
+    return;
+  }
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:filePath];
+    resolve(@(exists));
+  });
+}
+
+RCT_EXPORT_METHOD(getFileSize:(NSString *)filePath
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
+  if (!filePath || filePath.length == 0) {
+    resolve(@(-1));
+    return;
+  }
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    if (![[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
+      resolve(@(-1));
+      return;
+    }
+    NSError *error = nil;
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:filePath error:&error];
+    if (error || !attrs) {
+      resolve(@(-1));
+      return;
+    }
+    unsigned long long size = [attrs fileSize];
+    resolve(@(size));
+  });
+}
+
+RCT_EXPORT_METHOD(listDirectory:(NSString *)dirPath
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
+  if (!dirPath || dirPath.length == 0) {
+    resolve(@[]);
+    return;
+  }
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    if (![[NSFileManager defaultManager] fileExistsAtPath:dirPath]) {
+      resolve(@[]);
+      return;
+    }
+    NSError *error = nil;
+    NSArray<NSString *> *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dirPath error:&error];
+    if (error || !files) {
+      resolve(@[]);
+      return;
+    }
+    resolve(files);
+  });
+}
+
 @end
 
 #pragma clang diagnostic pop

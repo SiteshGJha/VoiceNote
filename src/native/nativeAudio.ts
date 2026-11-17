@@ -125,18 +125,126 @@ export class NativeAudioBridge {
 
   public async verifyFileChecksum(filePath: string, expectedSha256: string): Promise<boolean> {
     const mod = this.nativeModule;
-    if (!mod || typeof mod.verifyFileChecksum !== 'function') {
+    if (mod && typeof mod.verifyFileChecksum === 'function') {
+      return mod.verifyFileChecksum(filePath, expectedSha256);
+    }
+    try {
+      const fs = require('fs');
+      const crypto = require('crypto');
+      if (!fs.existsSync(filePath)) return false;
+      const fileBuffer = fs.readFileSync(filePath);
+      const hash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+      return hash.toLowerCase() === expectedSha256.toLowerCase();
+    } catch {
       return false;
     }
-    return mod.verifyFileChecksum(filePath, expectedSha256);
   }
 
   public async moveFile(sourcePath: string, targetPath: string): Promise<boolean> {
     const mod = this.nativeModule;
-    if (!mod || typeof mod.moveFile !== 'function') {
+    if (mod && typeof mod.moveFile === 'function') {
+      return mod.moveFile(sourcePath, targetPath);
+    }
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const dir = path.dirname(targetPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.renameSync(sourcePath, targetPath);
+      return true;
+    } catch {
       return false;
     }
-    return mod.moveFile(sourcePath, targetPath);
+  }
+
+  public async getModelsDirectory(): Promise<string> {
+    const mod = this.nativeModule;
+    if (mod && typeof mod.getModelsDirectory === 'function') {
+      return mod.getModelsDirectory();
+    }
+    try {
+      const os = require('os');
+      const path = require('path');
+      return path.join(os.tmpdir(), 'voicenote_test_models');
+    } catch {
+      return '';
+    }
+  }
+
+  public async readTextFile(filePath: string): Promise<string | null> {
+    const mod = this.nativeModule;
+    if (mod && typeof mod.readTextFile === 'function') {
+      return mod.readTextFile(filePath);
+    }
+    try {
+      const fs = require('fs');
+      if (fs.existsSync(filePath)) {
+        return fs.readFileSync(filePath, 'utf8');
+      }
+    } catch {}
+    return null;
+  }
+
+  public async writeTextFile(filePath: string, content: string): Promise<boolean> {
+    const mod = this.nativeModule;
+    if (mod && typeof mod.writeTextFile === 'function') {
+      return mod.writeTextFile(filePath, content);
+    }
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(filePath, content, 'utf8');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  public async fileExists(filePath: string): Promise<boolean> {
+    const mod = this.nativeModule;
+    if (mod && typeof mod.fileExists === 'function') {
+      return mod.fileExists(filePath);
+    }
+    try {
+      const fs = require('fs');
+      return fs.existsSync(filePath);
+    } catch {
+      return false;
+    }
+  }
+
+  public async getFileSize(filePath: string): Promise<number> {
+    const mod = this.nativeModule;
+    if (mod && typeof mod.getFileSize === 'function') {
+      return mod.getFileSize(filePath);
+    }
+    try {
+      const fs = require('fs');
+      if (fs.existsSync(filePath)) {
+        return fs.statSync(filePath).size;
+      }
+    } catch {}
+    return -1;
+  }
+
+  public async listDirectory(dirPath: string): Promise<string[]> {
+    const mod = this.nativeModule;
+    if (mod && typeof mod.listDirectory === 'function') {
+      return mod.listDirectory(dirPath);
+    }
+    try {
+      const fs = require('fs');
+      if (fs.existsSync(dirPath)) {
+        return fs.readdirSync(dirPath);
+      }
+    } catch {}
+    return [];
   }
 
   public addMeteringListener(listener: (event: NativeAudioMeteringEvent) => void): () => void {

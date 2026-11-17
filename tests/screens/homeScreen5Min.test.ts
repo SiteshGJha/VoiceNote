@@ -34,6 +34,7 @@ jest.mock('@/audio/useAudioRecorder', () => ({
 
 jest.mock('@/services/modelManager', () => ({
   modelInstaller: {
+    initialize: jest.fn().mockResolvedValue(undefined),
     isProvisioned: () => true,
   },
 }));

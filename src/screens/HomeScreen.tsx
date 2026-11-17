@@ -65,6 +65,7 @@ export const HomeScreen: React.FC = () => {
   const [toastVisible, setToastVisible] = useState<boolean>(false);
   const [lastResult, setLastResult] = useState<PipelineResult | null>(null);
   const [backgroundProgress, setBackgroundProgress] = useState<RollingSessionProgress | null>(null);
+  const [isInitializingModels, setIsInitializingModels] = useState<boolean>(true);
 
   const vadGateRef = useRef<VadGate | null>(null);
   const handleStopRecordingRef = useRef<(() => Promise<void>) | null>(null);
@@ -112,6 +113,27 @@ export const HomeScreen: React.FC = () => {
     const ss = String(secs).padStart(2, '0');
     return `${mm}:${ss} / 05:00`;
   };
+
+  useEffect(() => {
+    let mounted = true;
+    if (typeof modelInstaller.initialize === 'function') {
+      modelInstaller
+        .initialize()
+        .catch((err) => {
+          logger.warn('HomeScreen', 'Model initialization error', err);
+        })
+        .finally(() => {
+          if (mounted) {
+            setIsInitializingModels(false);
+          }
+        });
+    } else {
+      setIsInitializingModels(false);
+    }
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     setActiveTone(defaultTone);
@@ -187,6 +209,15 @@ export const HomeScreen: React.FC = () => {
       return;
     }
     isStartingRef.current = true;
+
+    // Await model initialization in case startup reconciliation is still resolving
+    if (typeof modelInstaller.initialize === 'function') {
+      try {
+        await modelInstaller.initialize();
+      } catch (err) {
+        logger.warn('HomeScreen', 'Error awaiting model initialization on record', err);
+      }
+    }
 
     // Model guard: verify baseline ASR and SLM models are provisioned
     if (!modelInstaller.isProvisioned()) {
@@ -508,6 +539,7 @@ export const HomeScreen: React.FC = () => {
           <AnimatedRecordButton
             isRecording={isRecording}
             isProcessing={isProcessing}
+            disabled={isInitializingModels}
             onPress={isRecording ? handleStopRecording : handleStartRecording}
           />
 

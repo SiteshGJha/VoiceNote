@@ -1,12 +1,20 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { InstalledModel, ModelSpec, MODEL_CATALOG, getModelSpec, getModelDestinationSubdir } from './catalog';
+import {
+  InstalledModel,
+  ModelSpec,
+  MODEL_CATALOG,
+  getModelSpec,
+  getModelDestinationSubdir,
+  getModelFileName,
+} from './catalog';
 import { modelDownloader, ProgressCallback } from './downloader';
 import { verifyChecksum } from './verifier';
 import { asrModelRegistry } from '@/ml/asr/modelRegistry';
 import { slmModelRegistry } from '@/ml/slm/modelRegistry';
 import { logger } from '@/utils/logger';
+import { nativeAudio } from '@/native/nativeAudio';
 
 export interface ProvisioningStatus {
   isProvisioned: boolean;
@@ -15,138 +23,254 @@ export interface ProvisioningStatus {
   missingSpecs: ModelSpec[];
 }
 
-class ModelInstallerService {
+export class ModelInstallerService {
   private installedModels: Map<string, InstalledModel> = new Map();
   private modelsDir: string;
   private manifestPath: string;
+  private isCustomModelsDir: boolean = false;
+  private initializationPromise: Promise<void> | null = null;
+  private isInitialized: boolean = false;
 
-  constructor() {
-    this.modelsDir =
-      process.env.NODE_ENV === 'test'
-        ? path.join(os.tmpdir(), 'voicenote_test_models')
-        : path.join(os.homedir(), '.voicenote', 'models');
+  constructor(modelsDirOverride?: string) {
+    if (modelsDirOverride) {
+      this.modelsDir = modelsDirOverride;
+      this.isCustomModelsDir = true;
+    } else {
+      this.modelsDir =
+        process.env.NODE_ENV === 'test'
+          ? path.join(os.tmpdir(), 'voicenote_test_models')
+          : path.join(os.homedir(), '.voicenote', 'models');
+    }
     this.manifestPath = path.join(this.modelsDir, 'installed_models.json');
-    this.initializeFromStorage();
+
+    // In automated test environment, retain mock test models for legacy suites if not overridden
+    if (process.env.NODE_ENV === 'test' && !modelsDirOverride) {
+      this.seedTestMockModels();
+    }
   }
 
-  private initializeFromStorage(): void {
-    // 1. Ensure root models directory exists
-    try {
-      if (!fs.existsSync(this.modelsDir)) {
-        fs.mkdirSync(this.modelsDir, { recursive: true });
+  private seedTestMockModels(): void {
+    const baseSpec = getModelSpec('whisper-base-multilingual');
+    if (baseSpec && !this.installedModels.has(baseSpec.id)) {
+      const asrDir = path.join(this.modelsDir, 'asr');
+      if (!fs.existsSync(asrDir)) {
+        fs.mkdirSync(asrDir, { recursive: true });
       }
-    } catch (err) {
-      logger.warn('ModelInstaller', 'Could not create models directory on startup', err);
+      const defaultPath = path.join(asrDir, `${baseSpec.id}.gguf`);
+      if (!fs.existsSync(defaultPath)) {
+        fs.writeFileSync(defaultPath, Buffer.from(`TEST_MODEL_${baseSpec.id}`));
+      }
+      this.installedModels.set(baseSpec.id, {
+        id: baseSpec.id,
+        kind: baseSpec.kind,
+        displayName: baseSpec.displayName,
+        sizeBytes: baseSpec.sizeBytes,
+        version: baseSpec.version,
+        localPath: defaultPath,
+        installedAt: new Date().toISOString(),
+      });
+      asrModelRegistry.registerInstalledModel(baseSpec.id, defaultPath);
     }
 
-    // 2. Load persisted manifest if present, pruning phantom entries whose files do not exist
-    if (fs.existsSync(this.manifestPath)) {
+    const defaultSlmSpec = getModelSpec('qwen2.5-0.5b-instruct');
+    if (defaultSlmSpec && !this.installedModels.has(defaultSlmSpec.id)) {
+      const slmDir = path.join(this.modelsDir, 'slm');
+      if (!fs.existsSync(slmDir)) {
+        fs.mkdirSync(slmDir, { recursive: true });
+      }
+      const defaultSlmPath = path.join(slmDir, `${defaultSlmSpec.id}-${defaultSlmSpec.quant}.gguf`);
+      if (!fs.existsSync(defaultSlmPath)) {
+        fs.writeFileSync(defaultSlmPath, Buffer.from(`TEST_MODEL_${defaultSlmSpec.id}`));
+      }
+      this.installedModels.set(defaultSlmSpec.id, {
+        id: defaultSlmSpec.id,
+        kind: defaultSlmSpec.kind,
+        displayName: defaultSlmSpec.displayName,
+        sizeBytes: defaultSlmSpec.sizeBytes,
+        version: defaultSlmSpec.version,
+        localPath: defaultSlmPath,
+        installedAt: new Date().toISOString(),
+      });
+      slmModelRegistry.registerInstalledModel(defaultSlmSpec.id, defaultSlmPath);
+    }
+  }
+
+  /**
+   * Initializes model manager by resolving native paths, executing Tier 1 manifest check,
+   * or falling back to Tier 2 deep disk reconciliation. Single-flight mutex protected.
+   */
+  public initialize(): Promise<void> {
+    if (this.isInitialized) {
+      return Promise.resolve();
+    }
+    if (this.initializationPromise) {
+      return this.initializationPromise;
+    }
+    this.initializationPromise = this.doInitialize().finally(() => {
+      this.initializationPromise = null;
+    });
+    return this.initializationPromise;
+  }
+
+  private async doInitialize(): Promise<void> {
+    // 1. Resolve native models directory if running with native bridge
+    if (!this.isCustomModelsDir && nativeAudio.isNativeAvailable) {
       try {
-        const raw = fs.readFileSync(this.manifestPath, 'utf8');
-        const list: InstalledModel[] = JSON.parse(raw);
-        let prunedAny = false;
-        for (const item of list) {
-          if (fs.existsSync(item.localPath)) {
-            // Check if it's a dummy test fixture accidentally persisted from tests
-            let isDummy = false;
-            try {
-              const stat = fs.statSync(item.localPath);
-              if (stat.size < 1000) {
-                const sample = fs.readFileSync(item.localPath, 'utf8');
-                if (typeof sample === 'string' && sample.startsWith('TEST_MODEL_')) {
-                  isDummy = true;
-                }
-              }
-            } catch {
-              // ignore
-            }
-
-            if (isDummy) {
-              prunedAny = true;
-              try {
-                fs.unlinkSync(item.localPath);
-              } catch {
-                // ignore
-              }
-              logger.info('ModelInstaller', `Pruned dummy test model fixture ${item.id} at ${item.localPath}`);
-              continue;
-            }
-
-            this.installedModels.set(item.id, item);
-            if (item.kind === 'asr') {
-              asrModelRegistry.registerInstalledModel(item.id, item.localPath);
-            } else if (item.kind === 'slm') {
-              slmModelRegistry.registerInstalledModel(item.id, item.localPath);
-            }
-          } else {
-            prunedAny = true;
-            logger.info('ModelInstaller', `Pruned phantom installed model ${item.id}: file not found at ${item.localPath}`);
-          }
-        }
-        if (prunedAny) {
-          this.persistManifest();
+        const nativeDir = await nativeAudio.getModelsDirectory();
+        if (nativeDir && nativeDir.length > 0) {
+          this.modelsDir = nativeDir;
+          this.manifestPath = path.join(this.modelsDir, 'installed_models.json');
         }
       } catch (err) {
-        logger.warn('ModelInstaller', 'Failed to read installed models manifest', err);
+        logger.warn('ModelInstaller', 'Failed to resolve native models directory', err);
       }
     }
 
-    // 3. In automated test environment only: seed mock test models so test fixtures have fixture data
-    if (process.env.NODE_ENV === 'test') {
-      const baseSpec = getModelSpec('whisper-base-multilingual');
-      if (baseSpec && !this.installedModels.has(baseSpec.id)) {
-        const asrDir = path.join(this.modelsDir, 'asr');
-        if (!fs.existsSync(asrDir)) {
-          fs.mkdirSync(asrDir, { recursive: true });
+    // 2. Tier 1 Fast Path: Check physical manifest on disk
+    let manifestLoaded = false;
+    try {
+      const raw = await nativeAudio.readTextFile(this.manifestPath);
+      if (raw && typeof raw === 'string' && raw.trim().length > 0) {
+        const list: InstalledModel[] = JSON.parse(raw);
+        if (Array.isArray(list) && list.length > 0) {
+          let anyInvalid = false;
+          const validEntries: InstalledModel[] = [];
+
+          for (const item of list) {
+            if (!item || !item.localPath) {
+              anyInvalid = true;
+              continue;
+            }
+            const exists = await nativeAudio.fileExists(item.localPath);
+            if (!exists) {
+              anyInvalid = true;
+              continue;
+            }
+            const size = await nativeAudio.getFileSize(item.localPath);
+            if (typeof item.sizeBytes === 'number' && item.sizeBytes > 0 && size !== item.sizeBytes) {
+              anyInvalid = true;
+              continue;
+            }
+            validEntries.push(item);
+          }
+
+          if (validEntries.length > 0) {
+            this.installedModels.clear();
+            for (const item of validEntries) {
+              this.installedModels.set(item.id, item);
+              if (item.kind === 'asr') {
+                asrModelRegistry.registerInstalledModel(item.id, item.localPath);
+              } else if (item.kind === 'slm') {
+                slmModelRegistry.registerInstalledModel(item.id, item.localPath);
+              }
+            }
+            if (anyInvalid) {
+              await this.persistManifest();
+            }
+            manifestLoaded = true;
+            logger.info('ModelInstaller', `Tier 1: Loaded ${validEntries.length} models from manifest`);
+          }
         }
-        const defaultPath = path.join(asrDir, `${baseSpec.id}.gguf`);
-        if (!fs.existsSync(defaultPath)) {
-          fs.writeFileSync(defaultPath, Buffer.from(`TEST_MODEL_${baseSpec.id}`));
-        }
-        this.installedModels.set(baseSpec.id, {
-          id: baseSpec.id,
-          kind: baseSpec.kind,
-          displayName: baseSpec.displayName,
-          sizeBytes: baseSpec.sizeBytes,
-          version: baseSpec.version,
-          localPath: defaultPath,
-          installedAt: new Date().toISOString(),
-        });
-        asrModelRegistry.registerInstalledModel(baseSpec.id, defaultPath);
+      }
+    } catch (err) {
+      logger.warn('ModelInstaller', 'Tier 1 fast path manifest read failed', err);
+    }
+
+    // 3. Tier 2 Deep Reconciliation if manifest was missing or not fully provisioned
+    if (!manifestLoaded || !this.isProvisioned()) {
+      await this.reconcileFromDisk();
+    }
+
+    this.isInitialized = true;
+  }
+
+  /**
+   * Tier 2 Deep Reconciliation: Scans physical asr/ and slm/ directories,
+   * matches filenames against MODEL_CATALOG, verifies SHA-256 checksums,
+   * constructs manifest and persists it to disk.
+   */
+  private async reconcileFromDisk(): Promise<void> {
+    logger.info('ModelInstaller', 'Tier 2: Scanning disk for model files to reconcile manifest');
+    const asrDir = path.join(this.modelsDir, 'asr');
+    const slmDir = path.join(this.modelsDir, 'slm');
+
+    const asrFiles = await nativeAudio.listDirectory(asrDir);
+    const slmFiles = await nativeAudio.listDirectory(slmDir);
+
+    const candidateFiles: { kind: 'asr' | 'slm'; fileName: string; dir: string }[] = [
+      ...asrFiles.map((fileName) => ({ kind: 'asr' as const, fileName, dir: asrDir })),
+      ...slmFiles.map((fileName) => ({ kind: 'slm' as const, fileName, dir: slmDir })),
+    ];
+
+    if (candidateFiles.length === 0) {
+      logger.info('ModelInstaller', 'Tier 2: No model files found in asr or slm directories');
+      return;
+    }
+
+    let newlyDiscovered = 0;
+
+    for (const spec of MODEL_CATALOG) {
+      if (this.installedModels.has(spec.id)) {
+        continue;
       }
 
-      const defaultSlmSpec = getModelSpec('qwen2.5-0.5b-instruct');
-      if (defaultSlmSpec && !this.installedModels.has(defaultSlmSpec.id)) {
-        const slmDir = path.join(this.modelsDir, 'slm');
-        if (!fs.existsSync(slmDir)) {
-          fs.mkdirSync(slmDir, { recursive: true });
+      const targetFileName = getModelFileName(spec).toLowerCase();
+      const specId = spec.id.toLowerCase();
+      const urlBaseName = path.basename(spec.url).toLowerCase();
+
+      for (const candidate of candidateFiles) {
+        if (candidate.kind !== spec.kind) continue;
+        const fn = candidate.fileName.toLowerCase();
+        const isMatch =
+          fn === targetFileName ||
+          fn === `${specId}.gguf` ||
+          fn === urlBaseName ||
+          fn.includes(specId);
+
+        if (!isMatch) continue;
+
+        const localPath = path.join(candidate.dir, candidate.fileName);
+        const sizeBytes = await nativeAudio.getFileSize(localPath);
+        if (sizeBytes <= 0) continue;
+
+        const isValid = await verifyChecksum(localPath, spec.sha256);
+        if (!isValid) {
+          logger.warn('ModelInstaller', `Tier 2: File ${localPath} failed checksum verification`);
+          continue;
         }
-        const defaultSlmPath = path.join(slmDir, `${defaultSlmSpec.id}-${defaultSlmSpec.quant}.gguf`);
-        if (!fs.existsSync(defaultSlmPath)) {
-          fs.writeFileSync(defaultSlmPath, Buffer.from(`TEST_MODEL_${defaultSlmSpec.id}`));
-        }
-        this.installedModels.set(defaultSlmSpec.id, {
-          id: defaultSlmSpec.id,
-          kind: defaultSlmSpec.kind,
-          displayName: defaultSlmSpec.displayName,
-          sizeBytes: defaultSlmSpec.sizeBytes,
-          version: defaultSlmSpec.version,
-          localPath: defaultSlmPath,
+
+        logger.info('ModelInstaller', `Tier 2: Discovered and verified model ${spec.id} at ${localPath}`);
+        const installed: InstalledModel = {
+          id: spec.id,
+          kind: spec.kind,
+          displayName: spec.displayName,
+          sizeBytes,
+          version: spec.version,
+          localPath,
           installedAt: new Date().toISOString(),
-        });
-        slmModelRegistry.registerInstalledModel(defaultSlmSpec.id, defaultSlmPath);
+        };
+
+        this.installedModels.set(spec.id, installed);
+        if (spec.kind === 'asr') {
+          asrModelRegistry.registerInstalledModel(spec.id, localPath);
+        } else if (spec.kind === 'slm') {
+          slmModelRegistry.registerInstalledModel(spec.id, localPath);
+        }
+        newlyDiscovered++;
+        break;
       }
+    }
+
+    if (newlyDiscovered > 0) {
+      await this.persistManifest();
+      logger.info('ModelInstaller', `Tier 2: Reconciled and saved ${newlyDiscovered} newly discovered models to manifest`);
     }
   }
 
-  private persistManifest(): void {
+  private async persistManifest(): Promise<void> {
     try {
-      const dir = path.dirname(this.manifestPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
       const data = JSON.stringify(Array.from(this.installedModels.values()), null, 2);
-      fs.writeFileSync(this.manifestPath, data, 'utf8');
+      await nativeAudio.writeTextFile(this.manifestPath, data);
     } catch (err) {
       logger.warn('ModelInstaller', 'Failed to persist installed models manifest', err);
     }
@@ -174,7 +298,7 @@ class ModelInstallerService {
       try {
         const hasPath = typeof m.localPath === 'string' && m.localPath.length > 0;
         const hasSize = typeof m.sizeBytes === 'number' && m.sizeBytes > 0;
-        return m.kind === 'asr' && hasPath && hasSize && fs.existsSync(m.localPath);
+        return m.kind === 'asr' && hasPath && hasSize;
       } catch {
         return false;
       }
@@ -183,7 +307,7 @@ class ModelInstallerService {
       try {
         const hasPath = typeof m.localPath === 'string' && m.localPath.length > 0;
         const hasSize = typeof m.sizeBytes === 'number' && m.sizeBytes > 0;
-        return m.kind === 'slm' && hasPath && hasSize && fs.existsSync(m.localPath);
+        return m.kind === 'slm' && hasPath && hasSize;
       } catch {
         return false;
       }
@@ -254,7 +378,7 @@ class ModelInstallerService {
     };
 
     this.installedModels.set(spec.id, installed);
-    this.persistManifest();
+    await this.persistManifest();
 
     if (spec.kind === 'asr') {
       asrModelRegistry.registerInstalledModel(spec.id, localPath);
@@ -287,7 +411,7 @@ class ModelInstallerService {
         fs.unlinkSync(model.localPath);
       }
       this.installedModels.delete(id);
-      this.persistManifest();
+      await this.persistManifest();
 
       if (model.kind === 'asr') {
         asrModelRegistry.unregisterModel(id);
@@ -314,7 +438,8 @@ class ModelInstallerService {
       return false;
     }
 
-    if (!fs.existsSync(model.localPath)) {
+    const exists = await nativeAudio.fileExists(model.localPath);
+    if (!exists) {
       logger.warn('ModelInstaller', `Model file does not exist on disk: ${model.localPath}`);
       return false;
     }

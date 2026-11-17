@@ -33,6 +33,7 @@ jest.mock('@/audio/useAudioRecorder', () => ({
 
 jest.mock('@/services/modelManager', () => ({
   modelInstaller: {
+    initialize: jest.fn().mockResolvedValue(undefined),
     listInstalled: () => [
       { kind: 'asr', id: 'whisper-base' },
       { kind: 'slm', id: 'qwen' },
